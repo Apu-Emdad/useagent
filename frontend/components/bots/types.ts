@@ -55,6 +55,8 @@ export interface ApiFiring {
   run_id: string;
   fired_at: string;
   trigger: string;
+  /** "queued" until the run settles, then the run's terminal status. */
+  status: string;
   run_status: string | null;
   run_summary: string | null;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { RiAddLine, RiDeleteBinLine, RiPlayLine } from "@remixicon/react";
+import { RiAddLine, RiDeleteBinLine, RiHistoryLine, RiPlayLine } from "@remixicon/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -10,6 +10,7 @@ import { Button } from "@/components/base/buttons/button";
 import * as Modal from "@/components/base/modal/modal";
 import { Switch } from "@/components/base/switch/switch";
 import { NewRoutineForm } from "./routine-form";
+import { RoutineHistoryDrawer } from "./routine-history";
 import { deleteRoutine, fetchRoutines, runRoutineNow, updateRoutine } from "./routines-api";
 import { relativeTime } from "./roster-model";
 import { type ApiBot, type ApiRoutine, OFFLINE_MESSAGE } from "./types";
@@ -33,6 +34,7 @@ function RoutineRow({
   const now = useNow();
   const [busy, setBusy] = useState<"toggle" | "run" | "delete" | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   /** The run a test run started, until this row goes away. */
   const [started, setStarted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +101,9 @@ function RoutineRow({
               </Link>
             </span>
           )}
+          <Button variant="ghost" size="small" leadingIcon={RiHistoryLine} onClick={() => setHistoryOpen(true)}>
+            History
+          </Button>
         </div>
         <Button
           variant="ghost"
@@ -114,6 +119,7 @@ function RoutineRow({
           {error}
         </p>
       )}
+      <RoutineHistoryDrawer bot={bot} routine={routine} open={historyOpen} onClose={() => setHistoryOpen(false)} />
       <Modal.Root open={confirming} onOpenChange={setConfirming}>
         <Modal.Content className="max-w-[400px] rounded-2xl border border-border-button-default bg-background-primary-default shadow-dropdown">
           <Modal.Header
