@@ -18,7 +18,7 @@ const DELIVERABLE_EXTENSIONS = [
 const PRUNED_DIRECTORIES = [
   "node_modules", ".git", ".cache", ".venv", "venv", "__pycache__", "dist", "build", ".next",
   ".claude", ".codex", ".opencode", ".pi", ".config", "coverage",
-  ".useagent", ".skynet", ".skynet-inputs", ".useagent-inputs",
+  ".useagent", ".skynet", ".skynet-inputs", ".useagent-inputs", "target",
 ] as const;
 export const MAX_HARVESTED_FILES = 20;
 export const MAX_LISTING_RECORDS = 3000;
@@ -32,6 +32,19 @@ export interface HarvestCandidate {
   readonly path: string;
   readonly size: number;
 }
+
+/** What automatic discovery offers, and what it knowingly left out: changed
+ *  files that are empty or over the artifact size limit, and `truncated` when
+ *  more changed deliverables existed than one turn delivers. */
+export interface TurnOutputDiscovery {
+  readonly candidates: HarvestCandidate[];
+  readonly withheldPaths: string[];
+  readonly truncated: boolean;
+}
+
+/** A turn changed more deliverable-looking files than one delivery holds. A
+ *  product limit on automatic discovery, not a failed delivery. */
+export class TooManyTurnOutputs extends Error {}
 
 export type RunRow = NonNullable<Awaited<ReturnType<typeof getRun>>>;
 
@@ -72,21 +85,22 @@ export function repositoryListCommand(workspaceRoot: string): string {
  * baseline. The change time is used rather than the modification time: a copy
  * or extraction that preserves the modification time (`cp -p`, `tar`,
  * `rsync -a`) still changes the inode, and nothing in user space can set the
- * change time, so a deliverable placed with an old mtime is still found. */
+ * change time, so a deliverable placed with an old mtime is still found.
+ * `topLevelOnly` lists the workspace root's own files, nothing below it. */
 export function fileListCommand(
   workspaceRoot: string,
   since: string,
   repositoryRoots: readonly string[],
+  options: { readonly topLevelOnly?: boolean } = {},
 ): string {
   if (!TIMESTAMP_PATTERN.test(since)) throw new Error("artifact output baseline timestamp is invalid");
   const root = shellQuote(workspaceRoot);
+  const names = DELIVERABLE_EXTENSIONS.map((ext) => `-iname ${shellQuote(`*.${ext}`)}`).join(" -o ");
+  const matches = `-type f -newerct ${shellQuote(`@${since}`)} \\( ${names} \\) -printf '%s\\t%p\\0'`;
+  if (options.topLevelOnly) return boundedListing(`find ${root} -maxdepth 1 ${matches}`);
   const repositories = repositoryRoots.map((path) => `-path ${shellQuote(path)}`);
   const prune = [pruneClause(PRUNED_DIRECTORIES), `-path ${shellQuote(`${workspaceRoot}/screenshots`)}`, ...repositories].join(" -o ");
-  const names = DELIVERABLE_EXTENSIONS.map((ext) => `-iname ${shellQuote(`*.${ext}`)}`).join(" -o ");
-  return boundedListing(
-    `find ${root} -xdev \\( ${prune} \\) -prune -o -type f -newerct ${shellQuote(`@${since}`)} ` +
-    `\\( ${names} \\) -printf '%s\\t%p\\0'`,
-  );
+  return boundedListing(`find ${root} -xdev \\( ${prune} \\) -prune -o ${matches}`);
 }
 
 function listingRecords(output: string): string[] {
@@ -95,7 +109,7 @@ function listingRecords(output: string): string[] {
   const body = output.slice(0, -suffix.length);
   const records = body ? body.split("\0") : [];
   if (records.at(-1) === "") records.pop();
-  if (records.length > MAX_LISTING_RECORDS) throw new Error("artifact listing exceeded 3000 records");
+  if (records.length > MAX_LISTING_RECORDS) throw new TooManyTurnOutputs("artifact listing exceeded 3000 records");
   return records;
 }
 
@@ -111,26 +125,29 @@ export function parseFileListing(
   output: string,
   workspaceRoot: string,
   repositoryRoots: readonly string[],
-): HarvestCandidate[] {
+): Omit<TurnOutputDiscovery, "truncated"> {
   const candidates: HarvestCandidate[] = [];
+  const withheldPaths: string[] = [];
   for (const record of listingRecords(output)) {
     const tab = record.indexOf("\t");
     if (tab <= 0) throw new Error("artifact listing record is malformed");
     const sizeText = record.slice(0, tab);
     const size = Number(sizeText);
     const path = record.slice(tab + 1);
-    if (!/^\d+$/.test(sizeText) || !Number.isSafeInteger(size) || size <= 0 || size > MAX_ARTIFACT_BYTES) {
-      throw new Error("artifact listing size is invalid");
-    }
+    if (!/^\d+$/.test(sizeText) || !Number.isSafeInteger(size)) throw new Error("artifact listing size is invalid");
     if (!path.startsWith(`${workspaceRoot}/`)) throw new Error("artifact listing escaped the workspace");
     if (repositoryRoots.some((root) => path === root || path.startsWith(`${root}/`))) continue;
     if (path.startsWith(`${workspaceRoot}/screenshots/`) || requiresScreenshotProofPurpose(path)) continue;
+    if (size === 0 || size > MAX_ARTIFACT_BYTES) {
+      withheldPaths.push(path);
+      continue;
+    }
     candidates.push({ path, size });
   }
   if (candidates.length > MAX_HARVESTED_FILES) {
-    throw new Error(`automatic artifact discovery exceeded ${MAX_HARVESTED_FILES} candidates`);
+    throw new TooManyTurnOutputs(`automatic artifact discovery exceeded ${MAX_HARVESTED_FILES} candidates`);
   }
-  return candidates.toSorted((a, b) => a.path.localeCompare(b.path));
+  return { candidates: candidates.toSorted((a, b) => a.path.localeCompare(b.path)), withheldPaths };
 }
 
 async function sandboxList(run: RunRow, command: string): Promise<string> {
@@ -205,13 +222,13 @@ export async function discoverTurnOutputs(
   run: RunRow,
   options: { readonly signal?: AbortSignal } = {},
   dependencies: DiscoveryDependencies = defaultDependencies,
-): Promise<HarvestCandidate[]> {
+): Promise<TurnOutputDiscovery> {
   const event = await awaitWithSignal(() => readStableProviderEvent({
     id: `${run.id}:artifact-output-baseline`,
     runId: run.id,
     threadId: run.threadId,
   }), options.signal);
-  if (!event) return [];
+  if (!event) return { candidates: [], withheldPaths: [], truncated: false };
   if (event.provider !== BASELINE_PROVIDER || event.eventType !== BASELINE_EVENT_TYPE) {
     throw new Error("artifact output baseline event is invalid");
   }
@@ -225,16 +242,39 @@ export async function discoverTurnOutputs(
   }), options.signal);
   if (baseline.workdir !== workspaceRoot) throw new Error("artifact output baseline workdir mismatch");
 
-  const repositories = parseRepositoryListing(
-    await awaitWithSignal(() => dependencies.list(run, repositoryListCommand(workspaceRoot)), options.signal),
-    workspaceRoot,
-  );
-  return parseFileListing(
-    await awaitWithSignal(
-      () => dependencies.list(run, fileListCommand(workspaceRoot, baseline.timestamp, repositories)),
-      options.signal,
-    ),
-    workspaceRoot,
-    repositories,
-  );
+  const list = (command: string) => awaitWithSignal(() => dependencies.list(run, command), options.signal);
+  const overflow = (error: unknown) => {
+    if (!(error instanceof TooManyTurnOutputs)) throw error;
+  };
+  // More repository markers than a listing holds says nothing about changed
+  // outputs, so only the file listing's overflow counts as files left out.
+  let repositories: string[] | null = null;
+  try {
+    repositories = parseRepositoryListing(await list(repositoryListCommand(workspaceRoot)), workspaceRoot);
+  } catch (error) {
+    overflow(error);
+  }
+  if (repositories) {
+    try {
+      const found = parseFileListing(await list(fileListCommand(workspaceRoot, baseline.timestamp, repositories)), workspaceRoot, repositories);
+      return { ...found, truncated: false };
+    } catch (error) {
+      overflow(error);
+    }
+  }
+  // A project tree changed more files than one turn delivers (or could not be
+  // told apart from its repositories): offer only the workspace's own
+  // top-level files, where a finished zip or report lands, and none when even
+  // those are past the cap.
+  try {
+    const topLevel = parseFileListing(
+      await list(fileListCommand(workspaceRoot, baseline.timestamp, [], { topLevelOnly: true })),
+      workspaceRoot,
+      [],
+    );
+    return { ...topLevel, truncated: repositories !== null };
+  } catch (error) {
+    overflow(error);
+    return { candidates: [], withheldPaths: [], truncated: true };
+  }
 }

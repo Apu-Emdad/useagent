@@ -57,9 +57,11 @@ describe("automatic artifact discovery", () => {
           : complete("12\t/root/work/report.txt\0" + "9\t/root/work/repo/code.json\0");
       },
     };
-    expect(await discoverTurnOutputs(run, {}, deps)).toEqual([
-      { path: "/root/work/report.txt", size: 12 },
-    ]);
+    expect(await discoverTurnOutputs(run, {}, deps)).toEqual({
+      candidates: [{ path: "/root/work/report.txt", size: 12 }],
+      withheldPaths: [],
+      truncated: false,
+    });
     expect(commands).toHaveLength(2);
     expect(commands[1]).toContain("-newerct '@1757000000.100000000'");
   });
@@ -72,8 +74,45 @@ describe("automatic artifact discovery", () => {
         listed = true;
         return complete();
       },
-    })).toEqual([]);
+    })).toEqual({ candidates: [], withheldPaths: [], truncated: false });
     expect(listed).toBe(false);
+  });
+
+  test("a project tree past the cap falls back to the workspace's top-level files", async () => {
+    // Prod 2026-10-11: a Tauri project changed 500+ json/png/md files and the
+    // finished run failed with "Artifact delivery failed".
+    const run = await sandboxRun();
+    await recordOutputBaseline(run.id, clockSandbox(run.sandboxId!, ["1757000000.3"]), "/root/work");
+    const tree = Array.from({ length: 30 }, (_, index) => `10\t/root/work/app/src/icon-${index}.png\0`).join("");
+    const commands: string[] = [];
+    const deps: DiscoveryDependencies = {
+      list: async (_run, command) => {
+        commands.push(command);
+        if (command.includes("-name .git")) return complete();
+        return command.includes("-maxdepth 1")
+          ? complete("40\t/root/work/app-source-r15.zip\0")
+          : complete(tree + "40\t/root/work/app-source-r15.zip\0");
+      },
+    };
+    expect(await discoverTurnOutputs(run, {}, deps)).toEqual({
+      candidates: [{ path: "/root/work/app-source-r15.zip", size: 40 }],
+      withheldPaths: [],
+      truncated: true,
+    });
+    expect(commands).toHaveLength(3);
+
+    const crowded = Array.from({ length: 30 }, (_, index) => `10\t/root/work/out-${index}.png\0`).join("");
+    expect(await discoverTurnOutputs(run, {}, {
+      list: async (_run, command) => command.includes("-name .git") ? complete() : complete(crowded),
+    })).toEqual({ candidates: [], withheldPaths: [], truncated: true });
+
+    // Thousands of unchanged repository markers say nothing about changed files.
+    const markers = Array.from({ length: 3001 }, (_, index) => `/root/work/vendor/repo-${index}\0`).join("");
+    expect(await discoverTurnOutputs(run, {}, {
+      list: async (_run, command) => command.includes("-name .git")
+        ? complete(markers)
+        : complete("40\t/root/work/notes.md\0"),
+    })).toEqual({ candidates: [{ path: "/root/work/notes.md", size: 40 }], withheldPaths: [], truncated: false });
   });
 
   test("throws on baseline binding mismatch and listing failure", async () => {

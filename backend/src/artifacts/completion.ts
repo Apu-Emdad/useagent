@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, type DbTx } from "../db/client";
+import { sqlStateOf } from "../db/pg-errors";
 import { artifacts, finishedWorkObligations, runs } from "../db/schema";
 import { hasRunCancelIntent } from "../commands/cancel";
 import { absoluteArtifactPreviewUrl, absoluteArtifactUrl } from "../knowledge/gateway/artifact-links";
@@ -17,6 +18,11 @@ import { explicitOutputLinks, replaceOutputLinks } from "./output-links";
 type Run = typeof runs.$inferSelect;
 export const ARTIFACT_COMPLETION_FAILURE =
   "Artifact delivery failed: an output could not be published. The task is not complete. Retry the task or inspect its artifact details.";
+/** Said when automatic discovery left changed files out, so a summary never
+ *  implies every file the turn made was delivered. */
+export const WITHHELD_OUTPUTS_NOTE =
+  "\n\nOther files this turn changed were not delivered automatically (more than 20, empty, or over 50 MB). " +
+  "Ask for the ones you need.";
 const OUTPUT_BUDGET_MS = 90_000;
 const MAX_OUTPUTS = 20;
 
@@ -88,9 +94,16 @@ export async function completeRunOutputs(
       links = explicitOutputLinks(summary, root);
     }
     const explicitPaths = new Set(links.map((link) => link.path));
-    const discovered = await discoverTurnOutputs(run, { signal });
-    const paths = [...new Set([...explicitPaths, ...discovered.map((file) => file.path)])];
-    if (paths.length > MAX_OUTPUTS) throw new Error("too many outputs");
+    // Linked outputs are required and count first; automatic ones fill what is left.
+    if (explicitPaths.size > MAX_OUTPUTS) throw new Error("too many outputs");
+    const discovery = await discoverTurnOutputs(run, { signal });
+    const automaticPaths = discovery.candidates.map((file) => file.path).filter((path) => !explicitPaths.has(path));
+    const room = MAX_OUTPUTS - explicitPaths.size;
+    const paths = [...explicitPaths, ...automaticPaths.slice(0, room)];
+    // Left out: past the cap, or empty/oversized files nobody linked (a linked
+    // one is published or fails the run below).
+    const withheld = discovery.truncated || automaticPaths.length > room ||
+      discovery.withheldPaths.some((path) => !explicitPaths.has(path));
     const urls = new Map<string, { preview: string; download: string }>();
     for (const path of paths) {
       signal.throwIfAborted();
@@ -154,10 +167,17 @@ export async function completeRunOutputs(
     }
     const automatic = delivered.filter((file) => !explicitPaths.has(file.source_path));
     return {
-      status: "completed", summary: replaceOutputLinks(summary, links, urls) + fileLinks(automatic),
+      status: "completed",
+      summary: replaceOutputLinks(summary, links, urls) + fileLinks(automatic) + (withheld ? WITHHELD_OUTPUTS_NOTE : ""),
       artifactIds: [...new Set(delivered.map((file) => file.id))],
     };
   } catch (error) {
+    if (!(error instanceof LostPublicationClaim)) {
+      // The error's kind and SQLSTATE only: its message can carry query
+      // parameters with file contents.
+      console.warn(`[artifacts] run ${run.id} output delivery failed:`,
+        error instanceof Error ? error.name : typeof error, sqlStateOf(error) ?? "");
+    }
     return {
       status: error instanceof LostPublicationClaim ? "obsolete" : "failed",
       summary: ARTIFACT_COMPLETION_FAILURE + fileLinks(delivered),

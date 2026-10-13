@@ -274,6 +274,67 @@ describe("artifact completion", () => {
     expect(Buffer.from(uploads[0]!.bytes)).toEqual(pdfBytes);
   });
 
+  test("a turn that changed a whole project tree completes and says what it left out", async () => {
+    // Prod 2026-10-11: 500+ changed project files failed the finished run with
+    // "Artifact delivery failed"; now the top-level output is delivered instead.
+    const runId = await createSandboxRun(owner);
+    const path = "/root/work/final-report.pdf";
+    sandboxFiles.set(path, pdfBytes);
+    const tree = Array.from({ length: 30 }, (_, index) => `10\t/root/work/app/icons/icon-${index}.png\0`).join("");
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          if (command.includes("-name .git")) return { exitCode: 0, result: "__USEAGENT_LISTING_COMPLETE__\0" };
+          const top = `${pdfBytes.byteLength}\t${path}\0`;
+          return { exitCode: 0, result: `${command.includes("-maxdepth 1") ? top : tree + top}__USEAGENT_LISTING_COMPLETE__\0` };
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    try {
+      finalized = await finalizeRun(runId, "completed", "Built the app.", 100);
+    } finally {
+      resolver.mockRestore();
+    }
+
+    expect(finalized).toMatchObject({ applied: true, status: "completed" });
+    if (!finalized?.applied) throw new Error("run was not finalized");
+    expect(finalized.summary).toContain("final-report.pdf");
+    expect(finalized.summary).toContain("not delivered automatically");
+    expect((await listArtifacts(owner, runId)).body.artifacts).toHaveLength(1);
+  });
+
+  test("an empty file the summary links is not reported as left out", async () => {
+    const runId = await createSandboxRun(owner);
+    const path = "/root/work/notes.txt";
+    sandboxFiles.set(path, Buffer.from("written later"));
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          if (command.includes("-name .git")) return { exitCode: 0, result: "__USEAGENT_LISTING_COMPLETE__\0" };
+          return { exitCode: 0, result: `0\t${path}\0__USEAGENT_LISTING_COMPLETE__\0` };
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    try {
+      finalized = await finalizeRun(runId, "completed", `Notes: [notes.txt](${path})`, 100);
+    } finally {
+      resolver.mockRestore();
+    }
+    expect(finalized).toMatchObject({ applied: true, status: "completed" });
+    if (!finalized?.applied) throw new Error("run was not finalized");
+    expect(finalized.summary).not.toContain("not delivered automatically");
+  });
+
   const formats = [
     { name: "PDF", provider: "box", path: "/home/user/work/output.pdf", target: "</home/user/work/output.pdf>", image: false },
     { name: "DOCX", provider: "cube", path: "/root/work/output.docx", target: "/root/work/output.docx", image: false },
