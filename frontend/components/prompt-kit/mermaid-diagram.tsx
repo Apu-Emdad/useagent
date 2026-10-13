@@ -17,7 +17,7 @@ export function mermaidThemeName(isDark: boolean): "dark" | "default" {
 }
 
 /** Dark-scheme themes: the `html.dark, html.dusk, ...` list in app/globals.css. */
-const DARK_THEMES = ["dark", "dusk", "aura", "harbor", "phosphor", "slate", "sakura-night"];
+const DARK_THEMES = ["dark", "dusk", "aura", "harbor", "phosphor", "slate", "ember", "sakura-night"];
 const isDarkRoot = (root: Element) => DARK_THEMES.some((theme) => root.classList.contains(theme));
 
 /** The app theme lives on the <html> class list (next-themes); follow it so
