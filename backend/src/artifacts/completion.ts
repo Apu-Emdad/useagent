@@ -10,7 +10,7 @@ import { withFinishedWorkMaterializer } from "../runs/finished-work-materializat
 import { lockFinishedWorkRun } from "../runs/finished-work-lock";
 import { openFinishedWorkObligation, recordFinishedWorkMaterialization, recordFinishedWorkReceipt, resolveFinishedWorkObligation } from "../runs/finished-work-repo";
 import { resolveAttachedSandboxWorkspaceRoot } from "../sandboxes/workspace";
-import { discoverTurnOutputs } from "./harvest";
+import { discoverTurnOutputs, sandboxStillAnswers, TurnOutputListingUnavailable, type TurnOutputDiscovery } from "./harvest";
 import { publishSandboxArtifact } from "./publish";
 import { getArtifactForOrg, type ArtifactDescriptor } from "./repo";
 import { explicitOutputLinks, replaceOutputLinks } from "./output-links";
@@ -23,6 +23,11 @@ export const ARTIFACT_COMPLETION_FAILURE =
 export const WITHHELD_OUTPUTS_NOTE =
   "\n\nOther files this turn changed were not delivered automatically (more than 20, empty, or over 50 MB). " +
   "Ask for the ones you need.";
+/** Said when the sandbox would not list the turn's files even after retries
+ *  but still answers. The answer and every file the agent linked still
+ *  deliver; only automatic discovery is skipped, so the run finishes. */
+export const UNCOLLECTED_OUTPUTS_NOTE =
+  "\n\nFiles this turn changed could not be collected automatically. Ask for the ones you need.";
 const OUTPUT_BUDGET_MS = 90_000;
 const MAX_OUTPUTS = 20;
 
@@ -56,6 +61,14 @@ function outputGuard(run: Run, options: ArtifactCompletionOptions, signal: Abort
     }
     signal.throwIfAborted();
   };
+}
+
+/** The error's kind, SQLSTATE and sandbox RPC code only: its message can
+ *  carry query parameters with file contents. */
+function errorKind(error: unknown): string {
+  if (!(error instanceof Error)) return typeof error;
+  const rpcCode = /^(\d+): /.exec(error.message)?.[1];
+  return [error.name, sqlStateOf(error), rpcCode && `rpc ${rpcCode}`].filter(Boolean).join(" ");
 }
 
 function fileLinks(files: readonly ArtifactDescriptor[]): string {
@@ -96,7 +109,20 @@ export async function completeRunOutputs(
     const explicitPaths = new Set(links.map((link) => link.path));
     // Linked outputs are required and count first; automatic ones fill what is left.
     if (explicitPaths.size > MAX_OUTPUTS) throw new Error("too many outputs");
-    const discovery = await discoverTurnOutputs(run, { signal });
+    let discovery: TurnOutputDiscovery = { candidates: [], withheldPaths: [], truncated: false };
+    let uncollected = false;
+    try {
+      discovery = await discoverTurnOutputs(run, { signal });
+    } catch (error) {
+      // Only a dropped listing against a sandbox that is still bound and still
+      // answers is skipped. A wrong listing, a changed binding or a sandbox
+      // that is gone fails delivery as before.
+      if (!(error instanceof TurnOutputListingUnavailable) || signal.aborted) throw error;
+      await db.transaction(guard);
+      if (!await sandboxStillAnswers(run, signal)) throw error;
+      console.warn(`[artifacts] run ${run.id} output discovery failed:`, errorKind(error.cause));
+      uncollected = true;
+    }
     const automaticPaths = discovery.candidates.map((file) => file.path).filter((path) => !explicitPaths.has(path));
     const room = MAX_OUTPUTS - explicitPaths.size;
     const paths = [...explicitPaths, ...automaticPaths.slice(0, room)];
@@ -168,15 +194,13 @@ export async function completeRunOutputs(
     const automatic = delivered.filter((file) => !explicitPaths.has(file.source_path));
     return {
       status: "completed",
-      summary: replaceOutputLinks(summary, links, urls) + fileLinks(automatic) + (withheld ? WITHHELD_OUTPUTS_NOTE : ""),
+      summary: replaceOutputLinks(summary, links, urls) + fileLinks(automatic) + (withheld ? WITHHELD_OUTPUTS_NOTE : "") +
+        (uncollected ? UNCOLLECTED_OUTPUTS_NOTE : ""),
       artifactIds: [...new Set(delivered.map((file) => file.id))],
     };
   } catch (error) {
     if (!(error instanceof LostPublicationClaim)) {
-      // The error's kind and SQLSTATE only: its message can carry query
-      // parameters with file contents.
-      console.warn(`[artifacts] run ${run.id} output delivery failed:`,
-        error instanceof Error ? error.name : typeof error, sqlStateOf(error) ?? "");
+      console.warn(`[artifacts] run ${run.id} output delivery failed:`, errorKind(error));
     }
     return {
       status: error instanceof LostPublicationClaim ? "obsolete" : "failed",

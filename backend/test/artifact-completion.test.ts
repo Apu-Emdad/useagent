@@ -308,6 +308,172 @@ describe("artifact completion", () => {
     expect((await listArtifacts(owner, runId)).body.artifacts).toHaveLength(1);
   });
 
+  test("a sandbox listing that drops once is retried and the output still delivers", async () => {
+    // Prod 2026-10-12: one E2B SandboxError on the listing failed a finished
+    // run with "Artifact delivery failed"; the user's resend worked.
+    const runId = await createSandboxRun(owner);
+    const path = "/root/work/price-notes.pdf";
+    sandboxFiles.set(path, pdfBytes);
+    let dropped = 0;
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          if (command.includes("-name .git")) return { exitCode: 0, result: "__USEAGENT_LISTING_COMPLETE__\0" };
+          if (dropped++ === 0) throw Object.assign(new Error("2: connection reset"), { name: "SandboxError" });
+          return { exitCode: 0, result: `${pdfBytes.byteLength}\t${path}\0__USEAGENT_LISTING_COMPLETE__\0` };
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    try {
+      finalized = await finalizeRun(runId, "completed", "Found both prices.", 100);
+    } finally {
+      resolver.mockRestore();
+    }
+
+    expect(finalized).toMatchObject({ applied: true, status: "completed" });
+    if (!finalized?.applied) throw new Error("run was not finalized");
+    expect(dropped).toBe(2);
+    expect(finalized.summary).toContain("price-notes.pdf");
+    expect(finalized.summary).not.toContain("could not be collected");
+    expect((await listArtifacts(owner, runId)).body.artifacts).toHaveLength(1);
+  });
+
+  test("a sandbox that still answers but will not list the turn's files completes the run with a note and keeps linked files", async () => {
+    const runId = await createSandboxRun(owner);
+    const linked = "/root/work/linked-report.pdf";
+    sandboxFiles.set(linked, pdfBytes);
+    let listings = 0;
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          if (command === "true") return { exitCode: 0, result: "" };
+          listings += 1;
+          throw Object.assign(new Error("13: stream closed"), { name: "SandboxError" });
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const warn = spyOn(console, "warn");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    let warnings: unknown[][] = [];
+    try {
+      finalized = await finalizeRun(runId, "completed", `Here it is: [Report](<${linked}>)`, 100);
+    } finally {
+      warnings = [...warn.mock.calls];
+      resolver.mockRestore();
+      warn.mockRestore();
+    }
+
+    expect(finalized).toMatchObject({ applied: true, status: "completed" });
+    if (!finalized?.applied) throw new Error("run was not finalized");
+    expect(listings).toBe(3);
+    expect(finalized.summary).toContain("could not be collected automatically");
+    expect(finalized.summary).not.toContain(linked);
+    expect((await listArtifacts(owner, runId)).body.artifacts).toHaveLength(1);
+    expect(warnings.some((call) => String(call[0]).includes("output discovery failed") && call[1] === "SandboxError rpc 13"))
+      .toBe(true);
+  });
+
+  test("a sandbox that no longer answers at all still fails delivery", async () => {
+    const runId = await createSandboxRun(owner);
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          throw Object.assign(new Error("14: sandbox gone"), { name: "SandboxError" });
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    try {
+      finalized = await finalizeRun(runId, "completed", "Found both prices.", 100);
+    } finally {
+      resolver.mockRestore();
+    }
+
+    expect(finalized).toMatchObject({ applied: true, status: "failed" });
+    if (!finalized?.applied) throw new Error("run was not finalized");
+    expect(finalized.summary).toContain("Artifact delivery failed");
+  });
+
+  test("a listing the sandbox answers with an error exit still fails delivery", async () => {
+    // Review round 2: the workspace vanished while the sandbox lived; find
+    // exited 1 every time and `true` still ran, which must not complete.
+    const runId = await createSandboxRun(owner);
+    let listings = 0;
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          if (command === "true") return { exitCode: 0, result: "" };
+          listings += 1;
+          return { exitCode: 1, result: "find: '/root/work': No such file or directory" };
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    try {
+      finalized = await finalizeRun(runId, "completed", "Done.", 100);
+    } finally {
+      resolver.mockRestore();
+    }
+
+    expect(finalized).toMatchObject({ applied: true, status: "failed" });
+    expect(listings).toBe(1);
+  });
+
+  test("a listing that comes back wrong still fails delivery", async () => {
+    const runId = await createSandboxRun(owner);
+    const sandbox = {
+      id: `sandbox-${runId}`,
+      process: {
+        async executeCommand(command: string) {
+          if (command === "date +%s.%N") return { exitCode: 0, result: "1757000000.100000000\n" };
+          if (command === "true") return { exitCode: 0, result: "" };
+          if (command.includes("-name .git")) return { exitCode: 0, result: "__USEAGENT_LISTING_COMPLETE__\0" };
+          return { exitCode: 0, result: "10\t/etc/passwd\0__USEAGENT_LISTING_COMPLETE__\0" };
+        },
+      },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, sandbox, "/root/work");
+    const resolver = spyOn(sandboxBindings, "resolveRunSandbox").mockResolvedValue(sandbox as never);
+    let finalized;
+    try {
+      finalized = await finalizeRun(runId, "completed", "Done.", 100);
+    } finally {
+      resolver.mockRestore();
+    }
+
+    expect(finalized).toMatchObject({ applied: true, status: "failed" });
+  });
+
+  test("a run rebound to another sandbox after its baseline still fails delivery", async () => {
+    const runId = await createSandboxRun(owner);
+    const original = {
+      id: `sandbox-${runId}`,
+      process: { async executeCommand() { return { exitCode: 0, result: "1757000000.100000000\n" }; } },
+    } as SandboxHandle;
+    await recordOutputBaseline(runId, original, "/root/work");
+    await setRunSandbox(runId, `replacement-${runId}`, { kind: "cube", credential: "env" });
+
+    const finalized = await finalizeRun(runId, "completed", "Done.", 100);
+    expect(finalized).toMatchObject({ applied: true, status: "failed" });
+  });
+
   test("an empty file the summary links is not reported as left out", async () => {
     const runId = await createSandboxRun(owner);
     const path = "/root/work/notes.txt";

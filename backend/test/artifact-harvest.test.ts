@@ -3,6 +3,8 @@ import "./helpers";
 import {
   discoverTurnOutputs,
   recordOutputBaseline,
+  TurnOutputListingFailed,
+  TurnOutputListingUnavailable,
   type DiscoveryDependencies,
 } from "../src/artifacts/harvest";
 import { createRun, getRun, setRunSandbox } from "../src/runs/repo";
@@ -129,6 +131,53 @@ describe("automatic artifact discovery", () => {
     await expect(discoverTurnOutputs(current, {}, {
       list: async () => "",
     })).rejects.toThrow("incomplete");
+  });
+
+  test("repeats a dropped listing and gives up after the retries", async () => {
+    const run = await sandboxRun();
+    await recordOutputBaseline(run.id, clockSandbox(run.sandboxId!, ["1757000000.4"]), "/root/work");
+    let calls = 0;
+    expect(await discoverTurnOutputs(run, {}, {
+      retryDelaysMs: [0, 0],
+      list: async (_run, command) => {
+        calls += 1;
+        if (calls === 1) throw Object.assign(new Error("2: connection reset"), { name: "SandboxError" });
+        return command.includes("-name .git") ? complete() : complete("5\t/root/work/out.md\0");
+      },
+    })).toEqual({ candidates: [{ path: "/root/work/out.md", size: 5 }], withheldPaths: [], truncated: false });
+    expect(calls).toBe(3);
+
+    let attempts = 0;
+    await expect(discoverTurnOutputs(run, {}, {
+      retryDelaysMs: [0, 0],
+      list: async () => {
+        attempts += 1;
+        throw Object.assign(new Error("14: sandbox unreachable"), { name: "SandboxError" });
+      },
+    })).rejects.toBeInstanceOf(TurnOutputListingUnavailable);
+    expect(attempts).toBe(3);
+
+    // A listing that ran and exited non-zero is an answer: not repeated, not a drop.
+    let answered = 0;
+    await expect(discoverTurnOutputs(run, {}, {
+      retryDelaysMs: [0, 0],
+      list: async () => {
+        answered += 1;
+        throw new TurnOutputListingFailed("artifact listing command failed");
+      },
+    })).rejects.toBeInstanceOf(TurnOutputListingFailed);
+    expect(answered).toBe(1);
+
+    // So is a provider refusing or truncating the result (Box: command_output_truncated).
+    let truncated = 0;
+    await expect(discoverTurnOutputs(run, {}, {
+      retryDelaysMs: [0, 0],
+      list: async () => {
+        truncated += 1;
+        throw Object.assign(new Error("command_output_truncated"), { name: "BoxApiError" });
+      },
+    })).rejects.toBeInstanceOf(TurnOutputListingFailed);
+    expect(truncated).toBe(1);
   });
 
   test("honors cancellation before invoking sandbox work", async () => {

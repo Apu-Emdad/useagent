@@ -23,6 +23,13 @@ const PRUNED_DIRECTORIES = [
 export const MAX_HARVESTED_FILES = 20;
 export const MAX_LISTING_RECORDS = 3000;
 const LISTING_TIMEOUT_SECONDS = 30;
+/** Waits before each repeated listing. A sandbox request can drop mid-flight
+ *  (prod 2026-10-12: an E2B SandboxError failed a finished run, and the
+ *  user's resend worked), and listing is read-only, so it is safe to repeat. */
+const LISTING_RETRY_DELAYS_MS: readonly number[] = [500, 2_000];
+/** Only a listing that failed fast is repeated: one that ran into its own
+ *  timeout would push discovery past the output budget. */
+const LISTING_RETRY_WINDOW_MS = 10_000;
 const LISTING_COMPLETE = "__USEAGENT_LISTING_COMPLETE__";
 const BASELINE_EVENT_TYPE = "artifact.output-baseline";
 const BASELINE_PROVIDER = "skynet";
@@ -46,10 +53,44 @@ export interface TurnOutputDiscovery {
  *  product limit on automatic discovery, not a failed delivery. */
 export class TooManyTurnOutputs extends Error {}
 
+/** The sandbox would not answer a read-only listing even after retries: the
+ *  request never came back, as opposed to a listing that came back wrong,
+ *  which still fails delivery. */
+export class TurnOutputListingUnavailable extends Error {}
+
+/** The listing command ran and exited non-zero: the sandbox answered, so it is
+ *  neither repeated nor treated as a dropped request. */
+export class TurnOutputListingFailed extends Error {}
+
 export type RunRow = NonNullable<Awaited<ReturnType<typeof getRun>>>;
 
 export interface DiscoveryDependencies {
   readonly list: (run: RunRow, command: string) => Promise<string>;
+  readonly retryDelaysMs?: readonly number[];
+}
+
+/** A request that never came back: E2B's dropped or timed-out RPC, or a
+ *  network error. The only listing failure worth repeating; any other error
+ *  (a truncated or refused result, say) is an answer and fails delivery. */
+function isTransportFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "SandboxError" || error.name === "TimeoutError") return true;
+  const code = (error as { code?: unknown }).code;
+  return (typeof code === "string" && /^(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|UND_ERR_)/.test(code)) ||
+    /fetch failed|socket hang up/i.test(error.message);
+}
+
+/** Whether the run's bound sandbox still runs a trivial command. A listing
+ *  that failed against a sandbox that still answers is a dropped request; a
+ *  sandbox that does not answer is gone, and delivery fails as before. */
+export async function sandboxStillAnswers(run: RunRow, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const sandbox = await awaitWithSignal(() => resolveRunSandbox(run), signal);
+    const result = await awaitWithSignal(() => sandbox.process.executeCommand("true", undefined, undefined, 10), signal);
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
 }
 
 function shellQuote(value: string): string {
@@ -153,7 +194,7 @@ export function parseFileListing(
 async function sandboxList(run: RunRow, command: string): Promise<string> {
   const sandbox = await resolveRunSandbox(run);
   const result = await sandbox.process.executeCommand(command, undefined, undefined, LISTING_TIMEOUT_SECONDS);
-  if (result.exitCode !== 0) throw new Error("artifact listing command failed");
+  if (result.exitCode !== 0) throw new TurnOutputListingFailed("artifact listing command failed");
   return result.result ?? "";
 }
 
@@ -242,7 +283,23 @@ export async function discoverTurnOutputs(
   }), options.signal);
   if (baseline.workdir !== workspaceRoot) throw new Error("artifact output baseline workdir mismatch");
 
-  const list = (command: string) => awaitWithSignal(() => dependencies.list(run, command), options.signal);
+  const delays = dependencies.retryDelaysMs ?? LISTING_RETRY_DELAYS_MS;
+  const list = async (command: string): Promise<string> => {
+    const started = Date.now();
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await awaitWithSignal(() => dependencies.list(run, command), options.signal);
+      } catch (error) {
+        if (options.signal?.aborted || error instanceof TurnOutputListingFailed) throw error;
+        if (!isTransportFailure(error)) throw new TurnOutputListingFailed("artifact listing was refused", { cause: error });
+        const delay = delays[attempt];
+        if (delay === undefined || Date.now() - started > LISTING_RETRY_WINDOW_MS) {
+          throw new TurnOutputListingUnavailable("sandbox listing unavailable", { cause: error });
+        }
+        await awaitWithSignal(() => Bun.sleep(delay), options.signal);
+      }
+    }
+  };
   const overflow = (error: unknown) => {
     if (!(error instanceof TooManyTurnOutputs)) throw error;
   };
