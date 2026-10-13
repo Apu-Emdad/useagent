@@ -301,7 +301,16 @@ export function createProviderGatewayRoutes(deps: ProviderRouteDeps = {}): Hono 
         target.provider,
       );
       if (!policy.ok) {
-        const status = policy.error === "invalid_json" || policy.error === "request_too_deep" ? 400 : 403;
+        // Anthropic's own shape and status: an engine ends the turn on it,
+        // where a 403 reads to Claude Code as an authentication failure it retries.
+        if (target.provider === "anthropic" && (policy.error === "output_limit_exceeded" || policy.error === "model_not_allowed")) {
+          logRefusal(400, policy.error, run.id);
+          const message = policy.error === "output_limit_exceeded"
+            ? `max_tokens ${String(policy.requested)} is above this gateway's limit of ${limits.maxOutputTokens}`
+            : `This task runs on ${run.model}; other models are not available to it here.`;
+          return c.json({ type: "error", error: { type: "invalid_request_error", message } }, 400);
+        }
+        const status =policy.error === "invalid_json" || policy.error === "request_too_deep" ? 400 : 403;
         return refuse(status, policy.error, run.id);
       }
       upstreamBody = policy.body;

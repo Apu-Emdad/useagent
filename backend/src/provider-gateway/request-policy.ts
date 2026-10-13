@@ -4,7 +4,8 @@ import type { GatewayRun } from "./run-authorization";
 export type OutputLimitField = "max_tokens" | "max_output_tokens" | null;
 
 export type ProviderBodyPolicyResult =
-  | { readonly ok: false; readonly error: "invalid_json" | "request_too_deep" | "model_not_allowed" | "request_not_allowed" | "output_limit_exceeded" }
+  | { readonly ok: false; readonly error: "invalid_json" | "request_too_deep" | "model_not_allowed" | "request_not_allowed" }
+  | { readonly ok: false; readonly error: "output_limit_exceeded"; readonly requested: unknown }
   | { readonly ok: true; readonly body: string; readonly requestedOutputTokens: number };
 
 /** How deep a request body may nest. Engine requests reach 12 (tool schemas);
@@ -138,7 +139,7 @@ export function applyProviderBodyPolicy(
       requested < 1 ||
       requested > maxOutputTokens
     ) {
-      return { ok: false, error: "output_limit_exceeded" };
+      return { ok: false, error: "output_limit_exceeded", requested };
     }
     requestedOutputTokens = body[outputLimitField] as number;
   }
