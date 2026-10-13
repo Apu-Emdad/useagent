@@ -434,6 +434,12 @@ describe("desktopUnavailableStep", () => {
   });
 });
 
+describe("desktop browser keyring", () => {
+  test("Chrome never uses the desktop keyring, whose system prompt dims the whole screen", () => {
+    expect(buildBrowserLaunchScript()).toContain("--password-store=basic");
+  });
+});
+
 describe("desktop browser background traffic", () => {
   test("every Chrome the desktop starts runs without its background traffic to Google", () => {
     const launch = buildBrowserLaunchScript();
