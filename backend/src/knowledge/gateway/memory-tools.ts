@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { MemoryScope } from "../../db/schema";
-import { recordProviderEvent } from "../../runs/provider-events";
+import { recordProviderEventIfAbsent } from "../../runs/provider-events";
 import { resolveScopedMemory, type ScopedMemoryPlan } from "../../memory/scope";
 import {
   addExplicitMemoryL0,
@@ -175,7 +175,7 @@ function recordMemoryEvent(
   eventType: string,
   payload: Record<string, unknown>,
 ): void {
-  void recordProviderEvent({
+  void recordProviderEventIfAbsent({
     id: `mem_${run.id}_${randomUUID().slice(0, 8)}`,
     runId: run.id,
     threadId: run.threadId,
