@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { SandboxHandle } from "../sandboxes/provider";
 import type { EngineRunContext } from "../engines/types";
 import {
+  mergeOpenCodeProviderConfig,
   opencodeProviderGatewayOptions,
   providerGatewayEnv,
   providerGatewaySandboxLabels,
@@ -18,6 +19,7 @@ import {
   SANDBOX_GENERATION,
 } from "./sandbox-config";
 import { verifyProviderToken } from "./token";
+import { OPENCODE_ALLOWED_MODELS } from "../runs/model-policy";
 import { verifyToolToken } from "../knowledge/gateway/token";
 import { TOOL_GATEWAY_SERVER_NAME } from "../knowledge/gateway/descriptor";
 
@@ -564,6 +566,39 @@ describe("sandbox provider gateway config", () => {
       provider: "anthropic",
       scope: "thread",
     });
+  });
+
+  test("Claude's settings cap output under the gateway ceiling and refresh the helper", async () => {
+    process.env.GATEWAY_PUBLIC_URL = "https://gateway.example.test";
+    process.env.PROVIDER_GATEWAY_SECRET = "provider-test-0123456789abcdef0123456789abcdef";
+    const run = ctx();
+    run.threadId = "thread-claude-settings";
+    const { sandbox, files } = recordingSandbox();
+    await prepareProviderGatewaySandbox(sandbox, run, "claude");
+    const settings = JSON.parse(files["/tmp/useagent-claude-capability/useagent-settings.json"]!) as { env?: Record<string, string> };
+    expect(files["/tmp/useagent-claude-capability/settings.json"]).toBe(JSON.stringify(settings));
+
+    // Claude Code asks 128K of a 1M-context Opus: past the gateway's 65,536 it was refused before the audit.
+    expect(settings.env).toEqual({
+      CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "1",
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "64000",
+    });
+  });
+
+  test("OpenCode asks every Anthropic model for no more output than the gateway takes", () => {
+    // OpenCode's catalog gives Opus 5, Sonnet 5 and Fable 5 128,000 output; the gateway refused (output_limit_exceeded).
+    const gateway = { baseURL: "https://gw/anthropic", apiKey: "cap" };
+    const retained = { models: { other: { name: "kept" } }, options: { timeout: 5 } };
+    const merged = mergeOpenCodeProviderConfig("anthropic", retained, gateway);
+    expect(merged.options).toEqual({ timeout: 5, ...gateway });
+    const models = merged.models as Record<string, unknown>;
+    expect(models.other).toEqual({ name: "kept" });
+    expect(models["claude-opus-5"]).toEqual({ limit: { context: 1_000_000, output: 64_000 } });
+    expect(models["claude-haiku-4-5"]).toEqual({ limit: { context: 200_000, output: 64_000 } });
+    for (const id of OPENCODE_ALLOWED_MODELS.anthropic) {
+      const { limit } = models[id] as { limit: { output: number } };
+      expect(limit.output).toBeLessThanOrEqual(65_536);
+    }
   });
 
   test("leaves 200K model ids unchanged", () => {

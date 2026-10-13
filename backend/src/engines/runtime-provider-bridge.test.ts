@@ -225,8 +225,18 @@ describe("T3 provider bridge", () => {
   });
 
   test("retains the limit reload revision across a post-config crash until acknowledged", async () => {
+    // The mock keeps one state slot for every model, so the Anthropic models start current.
+    const anthropic = (context: number) => ({ limit: { context, output: 64_000 } });
     let config = JSON.stringify({
       provider: {
+        anthropic: {
+          models: {
+            "claude-opus-5": anthropic(1_000_000),
+            "claude-sonnet-5": anthropic(1_000_000),
+            "claude-fable-5": anthropic(1_000_000),
+            "claude-haiku-4-5": anthropic(200_000),
+          },
+        },
         cerebras: {
           models: {
             "qwen-3.8-27b": { limit: { context: 65_536, output: 32_768 } },
