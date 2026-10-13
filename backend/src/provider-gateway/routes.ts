@@ -285,7 +285,7 @@ export function createProviderGatewayRoutes(deps: ProviderRouteDeps = {}): Hono 
         target.provider,
       );
       if (!policy.ok) {
-        const status = policy.error === "invalid_json" ? 400 : 403;
+        const status = policy.error === "invalid_json" || policy.error === "request_too_deep" ? 400 : 403;
         return c.json({ error: policy.error }, status);
       }
       upstreamBody = policy.body;

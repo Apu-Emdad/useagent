@@ -669,6 +669,20 @@ describe("provider gateway routes", () => {
   });
 });
 
+describe("a body nested past the gateway's depth", () => {
+  test("is a plain 400 for every provider, never a stack overflow", async () => {
+    const deep = `${"[".repeat(100_000)}${"]".repeat(100_000)}`;
+    let upstream = 0;
+    const response = await app({ fetchUpstream: async () => (upstream += 1, Response.json({})) }).request("/api/provider/openrouter/v1/chat/completions", {
+      method: "POST",
+      body: `{"model":"${run.model}","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"x","parameters":${deep}}}]}`,
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "request_too_deep" });
+    expect(upstream).toBe(0);
+  });
+});
+
 describe("thread-scoped capabilities (run-invariant config)", () => {
   const threadClaims: ProviderTokenClaims = { ...claims, scope: "thread" };
   const okUpstream = async () =>
