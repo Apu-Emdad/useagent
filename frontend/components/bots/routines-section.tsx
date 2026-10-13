@@ -1,6 +1,6 @@
 "use client";
 
-import { RiAddLine, RiDeleteBinLine, RiHistoryLine, RiPlayLine } from "@remixicon/react";
+import { RiAddLine, RiDeleteBinLine, RiEditLine, RiHistoryLine, RiPlayLine } from "@remixicon/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/base/badges/badge";
 import { Button } from "@/components/base/buttons/button";
 import * as Modal from "@/components/base/modal/modal";
 import { Switch } from "@/components/base/switch/switch";
-import { NewRoutineForm } from "./routine-form";
+import { RoutineForm } from "./routine-form";
 import { RoutineHistoryDrawer } from "./routine-history";
 import { deleteRoutine, fetchRoutines, runRoutineNow, updateRoutine } from "./routines-api";
 import { relativeTime } from "./roster-model";
@@ -35,6 +35,7 @@ function RoutineRow({
   const [busy, setBusy] = useState<"toggle" | "run" | "delete" | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   /** The run a test run started, until this row goes away. */
   const [started, setStarted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +52,20 @@ function RoutineRow({
       setBusy(null);
     }
   };
+
+  if (editing) {
+    return (
+      <RoutineForm
+        bot={bot}
+        routine={routine}
+        onCancel={() => setEditing(false)}
+        onSaved={(saved) => {
+          setEditing(false);
+          onChange(saved);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-border-button-default p-3">
@@ -105,6 +120,17 @@ function RoutineRow({
             History
           </Button>
         </div>
+        <Button
+          variant="ghost"
+          size="small"
+          iconOnly
+          className="ml-auto"
+          leadingIcon={RiEditLine}
+          aria-label={`Edit ${routine.name}`}
+          title="Edit routine"
+          disabled={busy !== null}
+          onClick={() => setEditing(true)}
+        />
         <Button
           variant="ghost"
           size="small"
@@ -192,10 +218,10 @@ export function RoutinesSection({ bot }: { bot: ApiBot }) {
         )}
       </div>
       {adding && (
-        <NewRoutineForm
+        <RoutineForm
           bot={bot}
           onCancel={() => setAdding(false)}
-          onCreated={() => {
+          onSaved={() => {
             setAdding(false);
             changed();
           }}
