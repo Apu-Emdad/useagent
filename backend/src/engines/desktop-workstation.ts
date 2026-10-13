@@ -130,7 +130,10 @@ export function buildBrowserLaunchScript(): string {
     `export DISPLAY=${BROWSER_DISPLAY}`,
     'mkdir -p "$HOME/.skynet/browser-profile"',
     "browser=$(command -v google-chrome 2>/dev/null || command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)",
-    'exec "$browser" --no-sandbox --disable-dev-shm-usage --disable-gpu --no-first-run --no-default-browser-check ' +
+    // --password-store=basic: never reach for the desktop keyring. Saving a password the
+    // agent or a user typed otherwise raises gnome-keyring's system prompt, which dims
+    // the whole sandbox screen behind a dialog nobody asked for.
+    'exec "$browser" --no-sandbox --disable-dev-shm-usage --disable-gpu --no-first-run --no-default-browser-check --password-store=basic ' +
       `${BROWSER_PRIVACY_FLAGS.join(" ")} ` +
       "--remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 " +
       "'--remote-allow-origins=*' " +

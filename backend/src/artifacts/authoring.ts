@@ -26,7 +26,7 @@ import {
 import { db } from "../db/client";
 import { sql } from "drizzle-orm";
 import { getRunForOrg } from "../runs/repo";
-import { recordProviderEvent } from "../runs/provider-events";
+import { recordProviderEventIfAbsent } from "../runs/provider-events";
 import { materializeFinishedWorkArtifactIfActive } from "../runs/finished-work-materialization-context";
 import { claimUploadForRun } from "../uploads/repo";
 import { artifactStorage } from "./storage";
@@ -352,19 +352,19 @@ export async function createAuthoredArtifact(input: {
     return created;
   });
 
+  // Insert-only and on every call, as artifact_publish does: the restricted
+  // gateway role may add a lifecycle event but never rewrite one (the upsert is
+  // refused with 42501), a failed write reaches the caller, and a replay heals
+  // an event that an earlier call committed the row without.
+  await recordProviderEventIfAbsent({
+    id: `artifact.created:${record.row.id}`,
+    runId: run.id,
+    threadId: run.threadId,
+    provider: "skynet",
+    eventType: "artifact.created",
+    payload: toArtifactDescriptor(record.row),
+  });
   if (record.created) {
-    const descriptor = toArtifactDescriptor(record.row);
-    await recordProviderEvent(
-      {
-        id: `artifact.created:${record.row.id}`,
-        runId: run.id,
-        threadId: run.threadId,
-        provider: "skynet",
-        eventType: "artifact.created",
-        payload: descriptor,
-      },
-      { critical: true },
-    );
     publishOrgChange(input.orgId, {
       type: "artifact",
       action: "created",

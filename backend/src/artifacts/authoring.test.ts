@@ -274,4 +274,29 @@ describe("browser-authored artifacts", () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.id).toBe(`artifact.created:${first.artifact.id}`);
   });
+
+  test("a replay restores a created event the first call lost, and never rewrites it", async () => {
+    const runId = await sandboxRun();
+    const input = {
+      orgId: ORG,
+      userId: USER,
+      runId,
+      kind: "document" as const,
+      name: "deck-notes.docx",
+      state: { text: "# Deck\nSix slides" },
+    };
+    const first = await createAuthoredArtifact(input);
+    // Production: the restricted gateway committed the row, then its event
+    // upsert was refused, so the run had the artifact and no card.
+    await db.delete(providerEvents).where(eq(providerEvents.id, `artifact.created:${first.artifact.id}`));
+
+    const replay = await createAuthoredArtifact(input);
+    expect(replay).toMatchObject({ created: false, artifact: { id: first.artifact.id } });
+    const [healed, ...extra] = await createdArtifactEvents(runId);
+    expect(extra).toHaveLength(0);
+    expect(healed).toMatchObject({ id: `artifact.created:${first.artifact.id}`, runId, provider: "skynet" });
+
+    await createAuthoredArtifact(input);
+    expect(await createdArtifactEvents(runId)).toEqual([healed!]);
+  });
 });
