@@ -314,6 +314,20 @@ export function providerGatewayEnv(
 export function claudeProviderGatewayEnvironment(model?: string): Record<string, string> {
   const baseUrl = providerGatewayEndpoint("anthropic", false);
   if (!baseUrl) return {};
+  return {
+    ANTHROPIC_BASE_URL: baseUrl,
+    // The snapshot's user-level Claude plugins/skills are neither tenant-owned
+    // nor bounded. A dedicated config root keeps the managed process deterministic;
+    // project CLAUDE.md instructions and selected useAgent instructions still load.
+    CLAUDE_CONFIG_DIR,
+    ...claudeModelSlots(model),
+    CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "1",
+  };
+}
+
+/** Every Claude Code model slot names the run's model, so its Haiku helper and
+ *  subagent calls ask the gateway for that model too: it refuses any other. */
+function claudeModelSlots(model?: string): Record<string, string> {
   const selectedModel = model?.trim() || "claude-opus-5";
   // Claude Code's documented `[1m]` selector is local model metadata only; it
   // strips the suffix before calling the Anthropic-compatible gateway. Keep the
@@ -323,17 +337,11 @@ export function claudeProviderGatewayEnvironment(model?: string): Record<string,
     ? `${selectedModel}[1m]`
     : selectedModel;
   return {
-    ANTHROPIC_BASE_URL: baseUrl,
-    // The snapshot's user-level Claude plugins/skills are neither tenant-owned
-    // nor bounded. A dedicated config root keeps the managed process deterministic;
-    // project CLAUDE.md instructions and selected useAgent instructions still load.
-    CLAUDE_CONFIG_DIR,
     ANTHROPIC_MODEL: runtimeModel,
     ANTHROPIC_DEFAULT_OPUS_MODEL: runtimeModel,
     ANTHROPIC_DEFAULT_SONNET_MODEL: runtimeModel,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: runtimeModel,
     CLAUDE_CODE_SUBAGENT_MODEL: runtimeModel,
-    CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "1",
   };
 }
 
@@ -569,12 +577,14 @@ export async function writeUserClaudeCapabilityFiles(
 
 /** The `--settings` file the Claude wrapper passes, rewritten every turn: the
  *  wrapper exports only the gateway URL and config dir, so per-run process
- *  settings ride here. Claude Code's own output default for the 1M-context
- *  models (128K) is past the gateway's ceiling, which refused every call. */
-function claudeManagedSettings(): Record<string, unknown> {
+ *  settings, the run's model slots among them, ride here. Claude Code's own
+ *  output default for the 1M-context models (128K) is past the gateway's
+ *  ceiling, which refused every call. */
+function claudeManagedSettings(model: string | undefined): Record<string, unknown> {
   return {
     apiKeyHelper: `cat \"${ANTHROPIC_TOKEN_FILE}\"`,
     env: {
+      ...claudeModelSlots(model),
       CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "1",
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(ANTHROPIC_ENGINE_OUTPUT_TOKENS),
     },
@@ -593,7 +603,7 @@ export async function prepareProviderGatewaySandbox(
   if (engine === "claude") {
     const token = mintResidentThreadToken(ctx, "claude", "anthropic");
     if (!token) throw new Error("provider gateway could not mint Claude capability");
-    const managedSettings = claudeManagedSettings();
+    const managedSettings = claudeManagedSettings(ctx.model);
     const toolDescriptor = toolGatewayDescriptor(ctx, "claude");
     const files = [
       { path: ANTHROPIC_TOKEN_FILE, content: token },

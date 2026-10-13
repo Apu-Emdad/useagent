@@ -568,18 +568,38 @@ describe("sandbox provider gateway config", () => {
     });
   });
 
-  test("Claude's settings cap output under the gateway ceiling and refresh the helper", async () => {
+  test("Claude's settings name the run's model in every slot, cap output under the gateway ceiling and refresh the helper", async () => {
     process.env.GATEWAY_PUBLIC_URL = "https://gateway.example.test";
     process.env.PROVIDER_GATEWAY_SECRET = "provider-test-0123456789abcdef0123456789abcdef";
-    const run = ctx();
-    run.threadId = "thread-claude-settings";
-    const { sandbox, files } = recordingSandbox();
-    await prepareProviderGatewaySandbox(sandbox, run, "claude");
-    const settings = JSON.parse(files["/tmp/useagent-claude-capability/useagent-settings.json"]!) as { env?: Record<string, string> };
-    expect(files["/tmp/useagent-claude-capability/settings.json"]).toBe(JSON.stringify(settings));
+    const settingsOf = async (model: string) => {
+      const run = ctx();
+      run.threadId = `thread-claude-settings-${model}`;
+      run.model = model;
+      const { sandbox, files } = recordingSandbox();
+      await prepareProviderGatewaySandbox(sandbox, run, "claude");
+      const settings = JSON.parse(files["/tmp/useagent-claude-capability/useagent-settings.json"]!) as { env?: Record<string, string> };
+      expect(files["/tmp/useagent-claude-capability/settings.json"]).toBe(JSON.stringify(settings));
+      return settings;
+    };
 
+    // The native wrapper exports only the gateway URL and config dir, so the slots
+    // ride the settings: otherwise Claude Code's Haiku helper and subagent calls ask
+    // for another model, which the gateway refuses.
+    const slots = (model: string) => ({
+      ANTHROPIC_MODEL: model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+      CLAUDE_CODE_SUBAGENT_MODEL: model,
+    });
     // Claude Code asks 128K of a 1M-context Opus: past the gateway's 65,536 it was refused before the audit.
-    expect(settings.env).toEqual({
+    expect((await settingsOf("claude-opus-5")).env).toEqual({
+      ...slots("claude-opus-5[1m]"),
+      CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "1",
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "64000",
+    });
+    expect((await settingsOf("claude-haiku-4-5")).env).toEqual({
+      ...slots("claude-haiku-4-5"),
       CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "1",
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "64000",
     });
