@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Hono } from "hono";
 import { ProviderGatewayAdmissionError } from "./audit";
 import type { GatewayRun } from "./run-authorization";
@@ -102,6 +102,34 @@ describe("provider gateway routes", () => {
       body: JSON.stringify({ model: run.model }),
     });
     expect(response.status).toBe(403);
+  });
+
+  test("a request refused before its audit row logs the run, status, reason and auth scheme, never the capability", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const claudeClaims = { ...claims, engine: "claude" as const, provider: "anthropic" as const };
+      const claudeRun = { ...run, engine: "claude" as const, model: "claude-opus-5" };
+      const headers = { authorization: "Bearer capability-bytes-1", "x-api-key": "capability-bytes-1" };
+      const capped = await app({ token: claudeClaims, activeRun: claudeRun }).request("/api/provider/anthropic/v1/messages", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model: "claude-opus-5", max_tokens: 128_000 }),
+      });
+      expect(capped.status).toBe(403);
+      const unbound = await app({ token: claudeClaims, activeRun: null }).request("/api/provider/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": "capability-bytes-1" },
+        body: "{}",
+      });
+      expect(unbound.status).toBe(403);
+      const lines = warn.mock.calls.map((call) => call.join(" "));
+      expect(lines).toEqual([
+        "[provider-gateway] refused anthropic/v1/messages run run-a: 403 output_limit_exceeded (auth bearer+x-api-key)",
+        "[provider-gateway] refused anthropic/v1/messages run run-a: 403 forbidden_no_live_run (auth x-api-key)",
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("OpenCode cannot spend the capability on a model other than the active run", async () => {
