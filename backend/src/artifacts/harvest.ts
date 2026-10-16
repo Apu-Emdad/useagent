@@ -1,3 +1,5 @@
+import { SANDBOX_STATE_DIR } from "../sandboxes/sandbox-names";
+import { PLATFORM_EVENT_LANES } from "@useagent/agent-harness/canonical";
 import { posix } from "node:path";
 import { getRun } from "../runs/repo";
 import { readStableProviderEvent, recordProviderEventIfAbsent } from "../runs/provider-events";
@@ -18,7 +20,8 @@ const DELIVERABLE_EXTENSIONS = [
 const PRUNED_DIRECTORIES = [
   "node_modules", ".git", ".cache", ".venv", "venv", "__pycache__", "dist", "build", ".next",
   ".claude", ".codex", ".opencode", ".pi", ".config", "coverage",
-  ".useagent", ".skynet", ".skynet-inputs", ".useagent-inputs", "target",
+  // The plane's state directory, and the inputs directory older releases used in retained sandboxes.
+  ".useagent", SANDBOX_STATE_DIR, `${SANDBOX_STATE_DIR}-inputs`, ".useagent-inputs", "target",
 ] as const;
 export const MAX_HARVESTED_FILES = 20;
 export const MAX_LISTING_RECORDS = 3000;
@@ -32,7 +35,7 @@ const LISTING_RETRY_DELAYS_MS: readonly number[] = [500, 2_000];
 const LISTING_RETRY_WINDOW_MS = 10_000;
 const LISTING_COMPLETE = "__USEAGENT_LISTING_COMPLETE__";
 const BASELINE_EVENT_TYPE = "artifact.output-baseline";
-const BASELINE_PROVIDER = "skynet";
+const BASELINE_PROVIDER = PLATFORM_EVENT_LANES.platform;
 const TIMESTAMP_PATTERN = /^\d+\.\d+$/;
 
 export interface HarvestCandidate {

@@ -569,7 +569,7 @@ describe("slack event → run", () => {
     // Prompt is cleaned (mention stripped) and scoped to the dev org.
     const run = await waitFor(async () => findRunByPrompt(`build ${marker}`));
     expect(run.prompt).toBe(`build ${marker}`);
-    expect(run.org_id).toBe("org-skynet-dev");
+    expect(run.org_id).toBe(DEV_ORG_ID);
     expect(run.parent_run_id).toBeNull();
     expect(run.thread_id).toBe(run.id); // a root run threads under itself
     const [persisted] = await db
@@ -3069,7 +3069,7 @@ describe("slack socket-mode ingest shares the HTTP handler", () => {
 
     // Run created via the shared handler, scoped to the dev org.
     const run = await waitFor(async () => findRunByPrompt(`socket ${marker}`));
-    expect(run.org_id).toBe("org-skynet-dev");
+    expect(run.org_id).toBe(DEV_ORG_ID);
 
     // Delivery attached downstream: the 👀 ack + the thread card land, and the
     // settled answer arrives as its own message.

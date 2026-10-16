@@ -19,8 +19,11 @@ import { setArtifactStorageForTest } from "./storage";
 import { InMemoryArtifactStorage } from "../../test/in-memory-artifact-storage";
 import { createArtifactRecord } from "./repo";
 import "../../test/helpers";
+import { DEV_ORG_ID } from "../dev-org";
+import { SANDBOX_STATE_DIR } from "../sandboxes/sandbox-names";
+import { PLATFORM_EVENT_LANES } from "@useagent/agent-harness/canonical";
 
-const ORG = "org-skynet-dev";
+const ORG = DEV_ORG_ID;
 const USER = "artifact-author@example.com";
 
 const storage = new InMemoryArtifactStorage();
@@ -232,7 +235,7 @@ describe("browser-authored artifacts", () => {
     expect(first.artifact.source_path).toStartWith("/.useagent/artifact-workspace/");
     const firstBytes = await storage.read(first.artifact.sha256);
     await db.update(artifacts)
-      .set({ sourcePath: first.artifact.source_path.replace("/.useagent/", "/.skynet/") })
+      .set({ sourcePath: first.artifact.source_path.replace("/.useagent/", `/${SANDBOX_STATE_DIR}/`) })
       .where(eq(artifacts.id, first.artifact.id));
     const [historical] = await db.select().from(artifacts).where(eq(artifacts.id, first.artifact.id));
     if (!historical) throw new Error("missing authored fixture");
@@ -266,7 +269,7 @@ describe("browser-authored artifacts", () => {
     expect(first.created).toBe(true);
     expect(replay.created).toBe(false);
     expect([first.artifact.id, second.row.id]).toContain(replay.artifact.id);
-    expect(replay.artifact.source_path).toStartWith("/.skynet/artifact-workspace/");
+    expect(replay.artifact.source_path).toStartWith(`/${SANDBOX_STATE_DIR}/artifact-workspace/`);
     expect(replay.artifact.workpiece).toEqual(first.artifact.workpiece);
     expect(await db.select().from(artifacts).where(eq(artifacts.sourcePath, historical.sourcePath)))
       .toHaveLength(2);
@@ -294,7 +297,7 @@ describe("browser-authored artifacts", () => {
     expect(replay).toMatchObject({ created: false, artifact: { id: first.artifact.id } });
     const [healed, ...extra] = await createdArtifactEvents(runId);
     expect(extra).toHaveLength(0);
-    expect(healed).toMatchObject({ id: `artifact.created:${first.artifact.id}`, runId, provider: "skynet" });
+    expect(healed).toMatchObject({ id: `artifact.created:${first.artifact.id}`, runId, provider: PLATFORM_EVENT_LANES.platform });
 
     await createAuthoredArtifact(input);
     expect(await createdArtifactEvents(runId)).toEqual([healed!]);

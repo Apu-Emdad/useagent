@@ -1,3 +1,4 @@
+import { PLATFORM_EVENT_LANES } from "@useagent/agent-harness/canonical";
 import { createHash } from "node:crypto";
 import {
   extractDocxText,
@@ -360,7 +361,7 @@ export async function createAuthoredArtifact(input: {
     id: `artifact.created:${record.row.id}`,
     runId: run.id,
     threadId: run.threadId,
-    provider: "skynet",
+    provider: PLATFORM_EVENT_LANES.platform,
     eventType: "artifact.created",
     payload: toArtifactDescriptor(record.row),
   });

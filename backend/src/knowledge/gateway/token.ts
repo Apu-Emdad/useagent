@@ -21,6 +21,7 @@ import { authSecretMaterial } from "../../security/runtime-secrets";
 // ---------------------------------------------------------------------------
 
 const VERSION = "v1";
+// Key-derivation label: tokens already held by live sandboxes verify under it.
 const DERIVE_LABEL = "skynet-tool-gateway-v1";
 
 /** How the capability binds to a turn (perf run-invariant-config slice):

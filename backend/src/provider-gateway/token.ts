@@ -2,6 +2,7 @@ import { ENGINE_IDS, type EngineId } from "../db/schema";
 import { mintSignedCapability, verifySignedCapability } from "../security/signed-capability";
 import { PROVIDER_IDS, type ProviderId } from "./provider";
 
+// Key-derivation label: tokens already held by live sandboxes verify under it.
 const TOKEN_OPTIONS = {
   deriveLabel: "skynet-provider-gateway-v1",
   get explicitSecret(): string | undefined {

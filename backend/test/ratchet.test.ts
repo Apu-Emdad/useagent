@@ -178,3 +178,89 @@ describe("dependency law", () => {
     expect(violations).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Product-name ratchet
+// ---------------------------------------------------------------------------
+
+/** The product's first name, in any case and with or without a separator. */
+const FIRST_NAME = /sky[-_.]?net/gi;
+
+// Files that keep the first name, and how often it appears in each. Every one
+// holds a value already persisted or deployed under it; the reasons are in
+// docs/architecture/legacy-identifiers.md. A count may only shrink, and a file
+// not listed here may not mention the name at all.
+const FIRST_NAME_ALLOWLIST: Record<string, number> = {
+  "backend/src/artifacts/authoring.ts": 1,
+  "backend/src/artifacts/publish.ts": 1,
+  "backend/src/db/gateway-grants.ts": 1,
+  "backend/src/dev-org.ts": 1,
+  "backend/src/knowledge/gateway/approval-capability.ts": 1,
+  "backend/src/knowledge/gateway/token.ts": 1,
+  "backend/src/memory/explicit-memory.ts": 1,
+  "backend/src/memory/team-memory.ts": 1,
+  "backend/src/provider-connections/codex-app-server-pool.ts": 1,
+  "backend/src/provider-gateway/token.ts": 1,
+  "backend/src/sandboxes/cube-warm-pool-reconcile.ts": 1,
+  "backend/src/sandboxes/label-compat.ts": 2,
+  "backend/src/sandboxes/sandbox-names.ts": 1,
+  "backend/src/secrets/crypto.ts": 1,
+  "backend/src/security/runtime-secrets.ts": 1,
+  "backend/src/wiki-gen/clone.ts": 2,
+  "backend/test/fixtures/runtime-v2/codex-turn-provider-failure.json": 238,
+  "deploy/local-sandbox/rootfs/home/user/Desktop/browser.desktop": 1,
+  "docs/architecture/legacy-identifiers.md": 25,
+  "frontend/app/(library)/knowledge/knowledge-data.ts": 1,
+  "memory/docker-compose.yml": 2,
+  "memory/tdai-gateway.yaml": 1,
+  "packages/agent-harness/src/canonical.ts": 7,
+  "packages/agent-harness/test/fixtures/opencode-heavy.json": 1,
+  "packages/sandbox-cube/src/provider.test.ts": 5,
+  "packages/sandbox-cube/src/provider.ts": 3,
+  "packages/sandbox-daytona/src/plugin.ts": 1,
+};
+
+/** Tracked files plus new ones git does not ignore, relative to the repo root. */
+function repoFiles(): string[] {
+  const listed = Bun.spawnSync(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+    cwd: REPO_ROOT,
+  });
+  if (listed.exitCode !== 0) throw new Error(`git ls-files failed: ${listed.stderr.toString()}`);
+  return listed.stdout.toString().split("\0").filter((path) => path && existsSync(join(REPO_ROOT, path)));
+}
+
+function firstNameCounts(): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const rel of repoFiles()) {
+    const bytes = readFileSync(join(REPO_ROOT, rel));
+    const text = bytes.subarray(0, 8000).includes(0) ? "" : bytes.toString("utf8");
+    const n = (rel.match(FIRST_NAME)?.length ?? 0) + (text.match(FIRST_NAME)?.length ?? 0);
+    if (n > 0) counts.set(rel, n);
+  }
+  return counts;
+}
+
+describe("product-name ratchet", () => {
+  const counts = firstNameCounts();
+
+  test("the first name appears only in allowlisted files, no more often than recorded", () => {
+    const over = [...counts]
+      .filter(([rel, n]) => n > (FIRST_NAME_ALLOWLIST[rel] ?? 0))
+      .map(([rel, n]) => `${rel}: ${n} > ${FIRST_NAME_ALLOWLIST[rel] ?? 0}`);
+    if (over.length) {
+      console.log(
+        "[name-ratchet] use the product name; a value that is already persisted under the first name belongs in one named constant (docs/architecture/legacy-identifiers.md):\n" +
+          over.join("\n"),
+      );
+    }
+    expect(over).toEqual([]);
+  });
+
+  test("allowlist counts are exact", () => {
+    const stale = Object.entries(FIRST_NAME_ALLOWLIST)
+      .filter(([rel, n]) => (counts.get(rel) ?? 0) !== n)
+      .map(([rel, n]) => `${rel}: ${counts.get(rel) ?? 0} (recorded ${n})`);
+    if (stale.length) console.log("[name-ratchet] lower or drop these entries:\n" + stale.join("\n"));
+    expect(stale).toEqual([]);
+  });
+});

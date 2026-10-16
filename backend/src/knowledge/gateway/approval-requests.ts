@@ -1,3 +1,4 @@
+import { PLATFORM_EVENT_LANES } from "@useagent/agent-harness/canonical";
 import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
 import { db } from "../../db/client";
 import { gatewayApprovalRequests } from "../../db/schema";
@@ -30,7 +31,7 @@ async function approvalTtlMs(orgId: string, threadId: string): Promise<number> {
 const LIST_LIMIT = 50;
 
 /** Timeline provider lane for approval cards (mirrors "useAgent-knowledge"). */
-const EVENT_PROVIDER = "skynet-gateway";
+const EVENT_PROVIDER = PLATFORM_EVENT_LANES.gateway;
 
 export type ApprovalRequestRecord = typeof gatewayApprovalRequests.$inferSelect;
 

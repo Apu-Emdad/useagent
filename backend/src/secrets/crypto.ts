@@ -16,6 +16,7 @@ import { authSecretMaterial, runtimeDevModeEnabled } from "../security/runtime-s
 
 const KEY_LEN = 32; // AES-256
 const IV_LEN = 12; // GCM standard nonce length
+// Stored ciphertext was sealed under this context; changing it makes it unreadable.
 const HKDF_INFO = "skynet-org-secrets-v1";
 const CIPHERTEXT_VERSION = "v2";
 
