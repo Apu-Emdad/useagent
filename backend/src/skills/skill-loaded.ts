@@ -5,6 +5,7 @@
 // skill body (bounded-payload rule: markers carry references, not oversized
 // content). Mirrors memory/retrieval-ledger.ts.
 
+import { PLATFORM_EVENT_LANES } from "@useagent/agent-harness/canonical";
 import type { SkillKind } from "../db/schema";
 import { recordProviderEventIfAbsent } from "../runs/provider-events";
 
@@ -44,7 +45,7 @@ export async function recordSkillLoaded(
     id: `skillloaded_${runId}`,
     runId,
     threadId,
-    provider: "skynet",
+    provider: PLATFORM_EVENT_LANES.platform,
     eventType: SKILL_LOADED,
     payload: loaded,
   }).catch(() => false);

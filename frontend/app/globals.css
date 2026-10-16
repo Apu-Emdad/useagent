@@ -5835,22 +5835,6 @@ input[type='search']::-webkit-search-cancel-button {
   }
 }
 
-/* ── opencode inline element (Live tab) ─────────────────────────────────────
-   The custom element's internal root wrapper reproduces opencode's own
-   `#root { h-dvh }` — VIEWPORT height. Inside our shorter pane that pushes
-   their composer below the clip. Force it to fill the PANE instead, and let
-   the app's internal flex handle scrolling. */
-skynet-oc-session {
-  display: block;
-  height: 100%;
-  overflow: hidden;
-}
-skynet-oc-session > * {
-  height: 100% !important;
-  max-height: 100% !important;
-  min-height: 0 !important;
-}
-
 /* The vendored sidebar primitives (components/sidebar-kit) read the shadcn color names.
    Map those names onto this product's tokens so the sidebar follows every
    theme without a palette of its own. See components/sidebar-kit/README.md. */

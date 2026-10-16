@@ -1,3 +1,4 @@
+import { SANDBOX_NAME_PREFIX, SANDBOX_STATE_HOME } from "../sandboxes/sandbox-names";
 import type { EngineId } from "../db/schema";
 import type { EngineRunContext } from "../engines/types";
 import type { SandboxHandle } from "../sandboxes/provider";
@@ -120,13 +121,16 @@ export function mergeOpenCodeProviderConfig(
 export const SANDBOX_GENERATION = "provider-gateway-v17-useagent-mcp-gateway-only-secrets";
 const COMPATIBILITY_SANDBOX_GENERATION = "provider-gateway-v17-useagent-mcp-compatibility-secrets";
 export const SANDBOX_GENERATION_LABEL = CANONICAL_SANDBOX_GENERATION_LABEL;
-const LEGACY_SANDBOX_MARKER = "$HOME/.skynet/provider-gateway-generation";
+const LEGACY_SANDBOX_MARKER = `${SANDBOX_STATE_HOME}/provider-gateway-generation`;
 const CANONICAL_SANDBOX_MARKER = "$HOME/.useagent/provider-gateway-generation";
 const SANDBOX_MARKER = CANONICAL_SANDBOX_MARKER;
-const LEGACY_OPENAI_TOKEN_FILE = "$HOME/.skynet/provider-openai.token";
+const LEGACY_OPENAI_TOKEN_FILE = `${SANDBOX_STATE_HOME}/provider-openai.token`;
 const CANONICAL_OPENAI_TOKEN_FILE = "$HOME/.useagent/provider-openai.token";
 const OPENAI_TOKEN_FILE = CANONICAL_OPENAI_TOKEN_FILE;
-export const CLAUDE_CONFIG_DIR = "/tmp/skynet-claude-config";
+/** Claude Code keeps its sessions here; retained sandboxes resume from it. */
+export const CLAUDE_CONFIG_DIR = `/tmp/${SANDBOX_NAME_PREFIX}-claude-config`;
+/** Codex records the provider id on every session it starts; retained sessions resume under it. */
+const CODEX_MODEL_PROVIDER_ID = SANDBOX_NAME_PREFIX;
 export const CLAUDE_CAPABILITY_DIR = "/tmp/useagent-claude-capability";
 export const CLAUDE_CAPABILITY_GID = 1000;
 export const CLAUDE_ACP_SETTINGS_FILE = `${CLAUDE_CAPABILITY_DIR}/settings.json`;
@@ -411,7 +415,7 @@ export function codexProviderConfigToml(
   if (!baseUrl) return null;
   return [
     `model = ${JSON.stringify(model)}`,
-    'model_provider = "skynet"',
+    `model_provider = "${CODEX_MODEL_PROVIDER_ID}"`,
     // Codex normally adds a Linux bubblewrap sandbox around every command. The
     // agent already runs inside its tenant-scoped Daytona sandbox, where nested
     // namespace/loopback setup is not permitted and fails intermittently. Disable
@@ -420,13 +424,13 @@ export function codexProviderConfigToml(
     'sandbox_mode = "danger-full-access"',
     'approval_policy = "never"',
     "",
-    "[model_providers.skynet]",
+    `[model_providers.${CODEX_MODEL_PROVIDER_ID}]`,
     'name = "UseAgent provider gateway"',
     `base_url = ${JSON.stringify(baseUrl)}`,
     'wire_api = "responses"',
     "requires_openai_auth = false",
     "",
-    "[model_providers.skynet.auth]",
+    `[model_providers.${CODEX_MODEL_PROVIDER_ID}.auth]`,
     'command = "sh"',
     `args = ["-c", ${JSON.stringify(readPresentCanonicalOrLegacyFile(
       CANONICAL_OPENAI_TOKEN_FILE,
@@ -480,7 +484,7 @@ export async function writePrivateFiles(
     if (alias) {
       const leaf = path.slice(path.lastIndexOf("/") + 1);
       const canonicalTemporary = `$HOME/.useagent/.${leaf}-${crypto.randomUUID()}.tmp`;
-      const legacyTemporary = `$HOME/.skynet/.${leaf}-${crypto.randomUUID()}.tmp`;
+      const legacyTemporary = `${SANDBOX_STATE_HOME}/.${leaf}-${crypto.randomUUID()}.tmp`;
       temporaryPaths.push(canonicalTemporary, legacyTemporary);
       return [
         `(umask 077; printf %s '${encoded}' | base64 -d > ${canonicalTemporary})`,
@@ -496,8 +500,8 @@ export async function writePrivateFiles(
   const result = await sandbox.process.executeCommand(
     [
       `trap 'rm -f -- ${temporaryPaths.join(" ")} 2>/dev/null || true' EXIT`,
-      "if [ -L $HOME/.skynet ] || [ -L $HOME/.useagent ]; then exit 1; fi",
-      "if [ -e $HOME/.skynet ]; then test -d $HOME/.skynet; else mkdir -m 700 $HOME/.skynet; fi",
+      `if [ -L ${SANDBOX_STATE_HOME} ] || [ -L $HOME/.useagent ]; then exit 1; fi`,
+      `if [ -e ${SANDBOX_STATE_HOME} ]; then test -d ${SANDBOX_STATE_HOME}; else mkdir -m 700 ${SANDBOX_STATE_HOME}; fi`,
       "if [ -e $HOME/.useagent ]; then test -d $HOME/.useagent; else mkdir -m 700 $HOME/.useagent; fi",
       "mkdir -p $HOME/.claude $HOME/.codex",
       ...leafChecks,

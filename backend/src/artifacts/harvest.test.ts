@@ -17,6 +17,7 @@ import {
   repositoryListCommand,
   TooManyTurnOutputs,
 } from "./harvest";
+import { SANDBOX_STATE_DIR } from "../sandboxes/sandbox-names";
 
 const complete = (records = "") => `${records}__USEAGENT_LISTING_COMPLETE__\0`;
 
@@ -45,7 +46,7 @@ describe("listing commands", () => {
     // The inode change time, never the modification time: a preserved-mtime copy must be found.
     expect(command).toContain("-newerct '@1757000000.123456789'");
     expect(command).not.toContain("-newermt");
-    expect(command).toContain("-name '.skynet-inputs'");
+    expect(command).toContain(`-name '${SANDBOX_STATE_DIR}-inputs'`);
     expect(command).toContain("-path '/root/work/repo-69'");
     for (const extension of ["pdf", "txt", "json", "xml", "tar", "gz"]) {
       expect(command).toContain(`-iname '*.${extension}'`);
