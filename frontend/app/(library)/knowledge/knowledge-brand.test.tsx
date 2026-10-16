@@ -4,6 +4,8 @@ import { knowledgeFolderLabel, knowledgeItemForDisplay, LEGACY_PRODUCT_FOLDER, s
 import { KnowledgeGallery } from "./knowledge-gallery";
 
 test("keeps the persisted knowledge folder key while displaying UseAgent", () => {
+  // Stored items carry this key; the literal is pinned so a rename fails here.
+  expect(LEGACY_PRODUCT_FOLDER).toBe("skynet-app");
   expect(seedFolders).toContain("useagent-app");
   expect(knowledgeFolderLabel("useagent-app")).toBe("UseAgent");
   expect(knowledgeFolderLabel(LEGACY_PRODUCT_FOLDER)).toBe("UseAgent");
