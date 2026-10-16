@@ -9,7 +9,7 @@
  * automatically); it is pure fs work and needs no database.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 // backend/test -> backend
@@ -220,20 +220,24 @@ const FIRST_NAME_ALLOWLIST: Record<string, number> = {
   "packages/sandbox-daytona/src/plugin.ts": 1,
 };
 
-/** Tracked files plus new ones git does not ignore, relative to the repo root. */
-function repoFiles(): string[] {
-  const listed = Bun.spawnSync(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
-    cwd: REPO_ROOT,
-  });
+/** Tracked files (including ones added with intent), relative to the repo root. */
+function trackedFiles(): string[] {
+  const listed = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: REPO_ROOT });
   if (listed.exitCode !== 0) throw new Error(`git ls-files failed: ${listed.stderr.toString()}`);
   return listed.stdout.toString().split("\0").filter((path) => path && existsSync(join(REPO_ROOT, path)));
 }
 
+/** A file's text, a symlink's target, or nothing for binary content. */
+function searchableText(abs: string): string {
+  if (lstatSync(abs).isSymbolicLink()) return readlinkSync(abs);
+  const bytes = readFileSync(abs);
+  return bytes.subarray(0, 8000).includes(0) ? "" : bytes.toString("utf8");
+}
+
 function firstNameCounts(): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const rel of repoFiles()) {
-    const bytes = readFileSync(join(REPO_ROOT, rel));
-    const text = bytes.subarray(0, 8000).includes(0) ? "" : bytes.toString("utf8");
+  for (const rel of trackedFiles()) {
+    const text = searchableText(join(REPO_ROOT, rel));
     const n = (rel.match(FIRST_NAME)?.length ?? 0) + (text.match(FIRST_NAME)?.length ?? 0);
     if (n > 0) counts.set(rel, n);
   }
