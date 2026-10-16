@@ -208,6 +208,7 @@ const FIRST_NAME_ALLOWLIST: Record<string, number> = {
   "backend/src/security/runtime-secrets.ts": 1,
   "backend/src/wiki-gen/clone.ts": 2,
   "backend/test/fixtures/runtime-v2/codex-turn-provider-failure.json": 238,
+  "backend/test/persisted-names.test.ts": 25,
   "deploy/local-sandbox/rootfs/home/user/Desktop/browser.desktop": 1,
   "docs/architecture/legacy-identifiers.md": 25,
   "frontend/app/(library)/knowledge/knowledge-data.ts": 1,
@@ -224,7 +225,8 @@ const FIRST_NAME_ALLOWLIST: Record<string, number> = {
 function trackedFiles(): string[] {
   const listed = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: REPO_ROOT });
   if (listed.exitCode !== 0) throw new Error(`git ls-files failed: ${listed.stderr.toString()}`);
-  return listed.stdout.toString().split("\0").filter((path) => path && existsSync(join(REPO_ROOT, path)));
+  // lstat, not exists: a dangling symlink is still checked, a deleted file is skipped.
+  return listed.stdout.toString().split("\0").filter((path) => path && lstatSync(join(REPO_ROOT, path), { throwIfNoEntry: false }));
 }
 
 /** A file's text, a symlink's target, or nothing for binary content. */

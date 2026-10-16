@@ -24,7 +24,8 @@ files it lists, at most as often as recorded, and a count may only shrink.
 | Memory gateway `instanceId` and the `skynet-memory-core-data` volume | `memory/tdai-gateway.yaml`, `memory/docker-compose.yml` | Running memory deployments were set up with them and hold their data there. | A memory migration. |
 | The desktop launcher path in the local sandbox image | `deploy/local-sandbox/rootfs/home/user/Desktop/browser.desktop` | It points into the sandbox state directory above. | With the state directory. |
 
-Recorded test fixtures that captured these values
+`backend/test/persisted-names.test.ts` pins each value literally, so a change fails
+there first. Recorded test fixtures that captured these values
 (`backend/test/fixtures/runtime-v2/codex-turn-provider-failure.json`,
 `packages/agent-harness/test/fixtures/opencode-heavy.json`) and the test of the
 Cube env fallback keep them too.
