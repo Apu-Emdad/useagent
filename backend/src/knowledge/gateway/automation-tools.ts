@@ -210,7 +210,7 @@ async function updateAutomation(
   delete patch.confirmEnable;
   delete patch.id;
   try {
-    const schedule = await updateScheduleForOrg(claims.orgId, id, patch);
+    const schedule = await updateScheduleForOrg(claims.orgId, id, patch, claims.userId || null);
     return textResult(`Updated automation ${schedule.name} (${schedule.id}).`, {
       automation: automationSummary(schedule),
     });
@@ -244,10 +244,10 @@ async function runAutomationNow(
   // Keep the standalone tool gateway importable without loading the backend's
   // command worker and authentication root. The execution graph is needed only
   // for this explicit mutating call.
-  const { fireScheduleForOrg } = await import("../../schedules/service");
+  const { runScheduleNow } = await import("../../schedules/service");
   let runId: string;
   try {
-    runId = await fireScheduleForOrg(schedule, "manual");
+    runId = await runScheduleNow(schedule, claims.userId || null);
   } catch (error) {
     if (error instanceof ScheduleServiceError) return serviceError(error);
     throw error;
@@ -280,7 +280,7 @@ async function deleteAutomation(
   const id = automationId(args);
   if (!id) return errorResult("automation_delete requires an automation id.");
   try {
-    await deleteScheduleForOrg(claims.orgId, id);
+    await deleteScheduleForOrg(claims.orgId, id, claims.userId || null);
     return textResult(`Deleted automation ${id}.`, { automation_id: id, deleted: true });
   } catch (error) {
     if (error instanceof ScheduleServiceError) return serviceError(error);
