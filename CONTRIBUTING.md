@@ -75,3 +75,5 @@ On your first pull request a bot asks you to sign the CLA: reply with the one li
 gives you. It records your signature on the `cla-signatures` branch of this repository,
 so later pull requests pass without asking again. The bot matches commits to people by
 their GitHub account, so commit with an email address that is on your GitHub profile.
+It reads only the first 30 comments on a pull request; on a longer thread, ask a maintainer
+to record your signature.

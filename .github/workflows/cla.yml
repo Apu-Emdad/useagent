@@ -39,3 +39,6 @@ jobs:
           path-to-signatures: signatures/version1/cla.json
           branch: cla-signatures
           allowlist: abhishekgahlot2,useagent-user,dependabot[bot]
+          # Only this exact line signs (case and outer spaces aside). Without it the
+          # action accepts any one-line comment that contains the phrase.
+          custom-pr-sign-comment: I have read the CLA Document and I hereby sign the CLA
