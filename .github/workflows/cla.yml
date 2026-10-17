@@ -7,8 +7,8 @@ name: CLA
 # pull_request_target (needed to comment on pull requests from forks) is safe.
 # The action is archived upstream; it stays pinned to its last release.
 #
-# When CLA.md changes, point path-to-document at the new commit and move to
-# signatures/version2 so everyone signs the new text.
+# path-to-document follows CLA.md on main. A wording change keeps
+# signatures/version1 (owner, 2026-10-18), so earlier signers are not asked again.
 on:
   issue_comment:
     types: [created]
@@ -35,7 +35,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path-to-document: https://github.com/useagenthq/useagent/blob/732617d8dda4d7da39b98c46a068334b16d9511d/CLA.md
+          path-to-document: https://github.com/useagenthq/useagent/blob/main/CLA.md
           path-to-signatures: signatures/version1/cla.json
           branch: cla-signatures
           allowlist: abhishekgahlot2,useagent-user,dependabot[bot]
