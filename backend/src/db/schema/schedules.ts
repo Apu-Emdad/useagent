@@ -17,7 +17,7 @@ import { runs } from "./runs";
 // ---------------------------------------------------------------------------
 // Schedules — unattended autonomy. A schedule fires the existing run-creation
 // path on a 5-field cron expression (the always-on 60s scheduler loop) or on a
-// manual "run now". `enabled` defaults FALSE — a peer tool's safety default, so an
+// manual "run now". `enabled` defaults FALSE — KiroCrew's safety default, so an
 // imported/created schedule never auto-fires until a human turns it on.
 // ---------------------------------------------------------------------------
 

@@ -1,5 +1,8 @@
-// Ported from a peer tool (Apache-2.0): src/kiro_crew/cron.py
-// a peer tool runs an asyncio timer that periodically fires due, enabled jobs;
+// Ported from KiroCrew (https://github.com/kirodotdev/KiroCrew), Apache-2.0:
+//   src/kiro_crew/cron.py
+// Copyright Amazon.com, Inc. or its affiliates. Changed: rewritten in
+// TypeScript for this codebase. License and NOTICE: third_party/licenses/kirocrew/.
+// KiroCrew runs an asyncio timer that periodically fires due, enabled jobs;
 // this is the Postgres-backed translation — a plain 60s interval tick.
 
 import { botsEnabled } from "../bots/rollout";

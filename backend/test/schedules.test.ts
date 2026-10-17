@@ -148,7 +148,7 @@ describe("schedules API", () => {
       engine: "mock",
     });
 
-    // a peer tool safety default: never enabled on create.
+    // KiroCrew's safety default: never enabled on create.
     expect(created.enabled).toBe(false);
     expect(created.name).toBe("Nightly audit");
     expect(created.cron).toBe("0 2 * * *");

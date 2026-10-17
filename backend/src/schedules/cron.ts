@@ -1,5 +1,8 @@
-// Ported from a peer tool (Apache-2.0): src/kiro_crew/cron.py
-// a peer tool's `cron_expr_matches` / `validate_cron_expr` delegate to the croniter
+// Ported from KiroCrew (https://github.com/kirodotdev/KiroCrew), Apache-2.0:
+//   src/kiro_crew/cron.py
+// Copyright Amazon.com, Inc. or its affiliates. Changed: rewritten in
+// TypeScript for this codebase. License and NOTICE: third_party/licenses/kirocrew/.
+// KiroCrew's `cron_expr_matches` / `validate_cron_expr` delegate to the croniter
 // dependency; here they are reimplemented as a dependency-free 5-field matcher
 // with the same semantics (standard Vixie cron, including the dom/dow OR rule).
 
