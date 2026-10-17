@@ -13,7 +13,7 @@ import {
   AUTOMATION_TOOLS as AUTOMATION_TOOL_CATALOG,
 } from "./automation-tool-catalog";
 import { getRunForOrg } from "../../runs/repo";
-import { getScheduleForOrg, listFirings, listSchedules, type ApiFiring, type ApiSchedule, type ScheduleRecord } from "../../schedules/repo";
+import { getScheduleForOrg, listFirings, listSchedules, nextRunAt, type ApiFiring, type ApiSchedule, type ScheduleRecord } from "../../schedules/repo";
 import {
   createScheduleForOrg,
   deleteScheduleForOrg,
@@ -161,6 +161,7 @@ function automationSummary(schedule: ApiSchedule | ScheduleRecord): Record<strin
     last_fired_at: api
       ? schedule.last_fired_at
       : schedule.lastFiredAt?.toISOString() ?? null,
+    next_due_at: api ? schedule.next_due_at : nextRunAt(schedule, new Date())?.toISOString() ?? null,
     created_at: api ? schedule.created_at : schedule.createdAt.toISOString(),
     updated_at: api ? schedule.updated_at : schedule.updatedAt.toISOString(),
   };

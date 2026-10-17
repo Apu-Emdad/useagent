@@ -202,7 +202,7 @@ describe("an automation answers to its creator", () => {
     const t = await team("auto-legacy");
     const bot = await json<{ bot: { id: string } }>("/api/bots", { method: "POST", cookies: t.creator.cookies, body: { name: "Desk", engine: "mock" } });
     const [legacy] = await db.insert(schedules).values({
-      orgId: t.owner.orgId, userId: t.teammateId, name: "Mine", cron: "* * * * *", prompt: "Read the mail.", engine: "mock", model: "m",
+      orgId: t.owner.orgId, userId: t.teammateId, name: "Mine", cron: "* * * * *", timezone: "UTC", prompt: "Read the mail.", engine: "mock", model: "m",
       botId: bot.body.bot.id, enabled: true,
     }).returning();
     const refused = await json<{ error: string; message: string }>(`/api/schedules/${legacy!.id}/run-now`, { method: "POST", cookies: t.teammate.cookies });
