@@ -30,6 +30,9 @@ import { RunAdmissionClosedError } from "../commands";
 import { SpendAllowanceExceededError } from "../runs/spend";
 import { SandboxMinutesExceededError } from "../runs/sandbox-minutes";
 import { BotsDisabledError } from "../bots/rollout";
+import { RoutineOwnerError } from "../bots/owner";
+import { asOrgAdmin } from "../provider-connections/repo";
+import { memberDisplayNames } from "../team/member-names";
 import {
   assertRunPromptLimit,
   RunPromptTooLargeError,
@@ -45,6 +48,45 @@ import {
 } from "./repo";
 
 type AutomationChange = Extract<OrgChange, { readonly type: "automation" }>;
+
+/**
+ * Who may act on an automation, a bot's routines included. Every firing runs as
+ * its creator: their keys, allowance, sandbox minutes and personal connections,
+ * where reads need no approval. So only the creator changes what it does,
+ * switches it on or runs it now. An org owner or admin may also pause or delete
+ * it, which runs nothing as anyone; that is authorized in the organisation's
+ * turn, as role changes are (org-lock.ts), so an admin demoted meanwhile gets
+ * nothing done. One with no creator runs as nobody, so any member may act on
+ * it. The service asks it around the change itself (update, delete, run now),
+ * so every door gets it: the automations API, the bot page and an agent's
+ * automation tools, where the agent acts as its run's owner.
+ */
+async function asAutomationActor<T>(
+  orgId: string,
+  scheduleId: string,
+  actorId: string | null,
+  intent: "change" | "stop",
+  act: () => Promise<T>,
+): Promise<T> {
+  const schedule = await getScheduleForOrg(orgId, scheduleId);
+  if (!schedule) throw new ScheduleServiceError(404, { error: "schedule not found" });
+  const creator = schedule.userId;
+  if (creator === null || creator === actorId) return act();
+  if (intent === "stop" && actorId !== null) {
+    const stopped = await asOrgAdmin(orgId, actorId, act);
+    if (stopped) return stopped.value;
+  }
+  const name = (await memberDisplayNames(orgId, [creator])).get(creator) ?? "the person who created it";
+  throw new ScheduleServiceError(403, {
+    error: "automation_creator_only",
+    message: `This automation runs as ${name}, so only they can change it or run it now. An admin can pause or delete it.`,
+  });
+}
+
+/** A change that only pauses: the one an admin may make to someone else's automation. */
+function pausesOnly(body: Record<string, unknown>): boolean {
+  return body.enabled === false && Object.keys(body).every((key) => key === "enabled");
+}
 
 function publishAutomationChange(orgId: string, change: AutomationChange): void {
   publishOrgChange(orgId, change);
@@ -318,7 +360,16 @@ export async function createScheduleForOrg(
   return schedule;
 }
 
-export async function updateScheduleForOrg(
+export function updateScheduleForOrg(
+  orgId: string,
+  id: string,
+  body: Record<string, unknown>,
+  actorId: string | null,
+): Promise<ApiSchedule> {
+  return asAutomationActor(orgId, id, actorId, pausesOnly(body) ? "stop" : "change", () => updateSchedulePatch(orgId, id, body));
+}
+
+async function updateSchedulePatch(
   orgId: string,
   id: string,
   body: Record<string, unknown>,
@@ -459,18 +510,34 @@ export async function updateScheduleForOrg(
   return updated;
 }
 
-export async function deleteScheduleForOrg(orgId: string, id: string): Promise<void> {
-  const deleted = await deleteSchedule(orgId, id);
-  if (!deleted) throw new ScheduleServiceError(404, { error: "schedule not found" });
-  publishAutomationChange(orgId, {
-    type: "automation",
-    action: "deleted",
-    automationId: id,
+export function deleteScheduleForOrg(orgId: string, id: string, actorId: string | null): Promise<void> {
+  return asAutomationActor(orgId, id, actorId, "stop", async () => {
+    const deleted = await deleteSchedule(orgId, id);
+    if (!deleted) throw new ScheduleServiceError(404, { error: "schedule not found" });
+    publishAutomationChange(orgId, {
+      type: "automation",
+      action: "deleted",
+      automationId: id,
+    });
+    await removeFromContextIndex(orgId, `automation:${id}`);
   });
-  await removeFromContextIndex(orgId, `automation:${id}`);
 }
 
-export async function fireScheduleForOrg(
+/** Run now: a manual firing, which runs as the creator like every firing. */
+export function runScheduleNow(schedule: ScheduleRecord, actorId: string | null): Promise<string> {
+  return asAutomationActor(schedule.orgId, schedule.id, actorId, "change", () => fireSchedule(schedule, "manual"));
+}
+
+/** The scheduler's firing of a due occurrence. A person's firing is runScheduleNow. */
+export function fireScheduleForOrg(
+  schedule: ScheduleRecord,
+  trigger: Extract<ScheduleTrigger, "cron">,
+  occurrence: Date = new Date(),
+): Promise<string> {
+  return fireSchedule(schedule, trigger, occurrence);
+}
+
+async function fireSchedule(
   schedule: ScheduleRecord,
   trigger: ScheduleTrigger,
   occurrence: Date = new Date(),
@@ -485,6 +552,7 @@ export async function fireScheduleForOrg(
     if (error instanceof BotsDisabledError) {
       throw new ScheduleServiceError(409, { error: error.code, retryable: false });
     }
+    if (error instanceof RoutineOwnerError) throw new ScheduleServiceError(403, { error: error.code, message: error.message });
     if (error instanceof SkillPinIntegrityError) {
       throw new ScheduleServiceError(error.code === "invalid_skill_pin" ? 400 : 409, {
         error: error.code,
