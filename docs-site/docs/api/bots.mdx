@@ -30,8 +30,8 @@ Bot names are unique within the org, case-insensitively.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/api/bots/:id/routines` | List routines attached to the bot. |
-| POST | `/api/bots/:id/routines` | Create a routine from `name`, `cron`, `timezone`, `prompt`, and optional `enabled`. Engine, model, repos, and skill come from the bot preset. The bot's creator only; a routine anyone else added earlier answers `403 routine_not_bot_owner` and is never run with the bot's setup (once the bot is archived, its routines run as plain automations of their creator). |
+| GET | `/api/bots/:id/routines` | List routines attached to the bot. Each carries its `timezone` and `nextDueAt`, the minute the scheduler fires it next (`null` while paused). |
+| POST | `/api/bots/:id/routines` | Create a routine from `name`, `cron`, `timezone` (IANA, `UTC` when omitted), `prompt`, and optional `enabled`. Engine, model, repos, and skill come from the bot preset. The bot's creator only; a routine anyone else added earlier answers `403 routine_not_bot_owner` and is never run with the bot's setup (once the bot is archived, its routines run as plain automations of their creator). |
 | PATCH | `/api/bots/:id/routines/:routineId` | Update name, cron, timezone, prompt, or enabled state. |
 | DELETE | `/api/bots/:id/routines/:routineId` | Delete the routine. Returns `204`. |
 | POST | `/api/bots/:id/routines/:routineId/run-now` | Fire immediately. Returns `202` with `runId` and the updated routine. |

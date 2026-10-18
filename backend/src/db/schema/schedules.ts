@@ -32,13 +32,13 @@ export const schedules = pgTable(
     orgId: text("org_id").notNull(),
     userId: text("user_id"),
     name: text("name").notNull(),
-    // 5-field cron expression ("min hour dom month dow"). Evaluated in
-    // `timezone` (below) when set, else in the scheduler's server-local time.
+    // 5-field cron expression ("min hour dom month dow"), evaluated in `timezone`.
     cron: text("cron").notNull(),
-    // IANA timezone the cron is evaluated in ("America/New_York"). Null = server
-    // local time (the pre-timezone behavior). Cloudflare-Scheduler parity: a
-    // schedule's wall-clock intent is explicit, not tied to where the box runs.
-    timezone: text("timezone"),
+    // IANA timezone the cron is evaluated in ("America/New_York"). Every schedule
+    // names one, so its wall-clock intent never depends on where the box runs;
+    // drizzle/0114_schedule_zones.sql gave the ones saved without a zone the zone
+    // their backend's clock read.
+    timezone: text("timezone").notNull(),
     prompt: text("prompt").notNull(),
     engine: text("engine").$type<EngineId>().notNull().default("mock"),
     model: text("model").notNull().default("claude-opus-5"),

@@ -25,6 +25,13 @@ automation_creator_only`, whose `message` names the creator. The same rule holds
 for a bot's routines and for an agent's automation tools, where the agent acts
 as its run's owner.
 
+Every automation runs its `cron` in a named IANA `timezone`. A create that sends
+none runs in `UTC` (the web app sends the creator's browser zone); a `PATCH` may
+change the zone, and one that names none leaves it as it is. `next_due_at` is the minute the
+scheduler fires it next, from the same occurrence rule it fires by,
+daylight-saving changes included; it is `null` while the automation is paused or
+when the cron names no date.
+
 | Method | Path | Description | Notes |
 | --- | --- | --- | --- |
 | GET | `/api/automations` | List the org's automations, newest first. | Returns `{automations, schedules}` (the same array under both keys for resumed clients). |

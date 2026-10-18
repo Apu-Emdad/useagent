@@ -31,7 +31,7 @@ import type { BotRow } from "../db/schema";
 import { asOrgAdmin } from "../provider-connections/repo";
 import { memberDisplayNames } from "../team/member-names";
 import { botsEnabled } from "./rollout";
-import { listFirings, markFired } from "../schedules/repo";
+import { listFirings, markFired, nextRunAt } from "../schedules/repo";
 import {
   createScheduleForOrg,
   deleteScheduleForOrg,
@@ -265,7 +265,7 @@ function routineView(row: {
   id: string;
   name: string;
   cron: string;
-  timezone: string | null;
+  timezone: string;
   prompt: string;
   enabled: boolean;
   lastFiredAt: Date | null;
@@ -279,6 +279,8 @@ function routineView(row: {
     prompt: row.prompt,
     enabled: row.enabled,
     lastFiredAt: row.lastFiredAt ? row.lastFiredAt.toISOString() : null,
+    // The minute the scheduler fires it next (schedules/repo.ts nextRunAt).
+    nextDueAt: nextRunAt(row, new Date())?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }

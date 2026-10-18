@@ -193,9 +193,9 @@ async function parseSkillPin(
   };
 }
 
-function parseTimezone(value: unknown): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || value === "") return null;
+/** The zone a request names, validated; none for absent, null or "". */
+function parseTimezone(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
   const timezone = typeof value === "string" ? value.trim() : "";
   if (!isValidTimezone(timezone)) {
     throw new ScheduleServiceError(400, { error: "timezone must be a valid IANA name" });
@@ -300,7 +300,10 @@ export async function createScheduleForOrg(
   if (!prompt) throw new ScheduleServiceError(400, { error: "prompt is required" });
   assertSchedulePromptLimit(prompt);
 
-  const timezone = parseTimezone(body.timezone) ?? null;
+  // Every schedule names the zone its cron runs in. A create that sends none
+  // (an API client, an agent's tool call) runs in UTC; the web app sends its
+  // creator's browser zone.
+  const timezone = parseTimezone(body.timezone) ?? "UTC";
   // Creation is an inert draft operation. Persist valid engine/model intent
   // even while a paid provider is temporarily unavailable; readiness is
   // enforced at enable and by the shared command lane at execution time.
@@ -377,7 +380,7 @@ async function updateSchedulePatch(
   const patch: Partial<{
     name: string;
     cron: string;
-    timezone: string | null;
+    timezone: string;
     prompt: string;
     engine: EngineId;
     model: string;
@@ -399,6 +402,9 @@ async function updateSchedulePatch(
 
   if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
 
+  // A patch may move the schedule to another zone. One that names none (a
+  // client still holding the schedule from before every schedule named one
+  // sends null) leaves the zone as it is.
   const timezone = parseTimezone(body.timezone);
   if (timezone !== undefined) patch.timezone = timezone;
 
